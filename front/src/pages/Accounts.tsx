@@ -10,6 +10,7 @@ import {
   Loader2,
   LogIn,
   Mail,
+  MoreHorizontal,
   Power,
   RefreshCw,
   Search,
@@ -287,6 +288,11 @@ export function AccountsPage() {
   const [authJsonLoading, setAuthJsonLoading] = useState<"" | "copy-cpa" | "copy-grok2api">("");
   const [visibleCount, setVisibleCount] = useState(50);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
+  const [moreMenu, setMoreMenu] = useState<{
+    item: AccountRecord;
+    top: number;
+    left: number;
+  } | null>(null);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
   });
@@ -362,6 +368,17 @@ export function AccountsPage() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [detail]);
+
+  useEffect(() => {
+    if (!moreMenu) return;
+    const close = () => setMoreMenu(null);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [moreMenu]);
 
   const toggleAll = (checked: boolean) => {
     setSelected((previous) => {
@@ -444,6 +461,89 @@ export function AccountsPage() {
     } catch (err: any) {
       showToast(err.message || "启动重新登录失败", "error");
     }
+  };
+
+  const openMoreMenu = (item: AccountRecord, button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 224;
+    const menuHeight = 172;
+    const left = Math.min(Math.max(rect.right - menuWidth, 8), window.innerWidth - menuWidth - 8);
+    const top = rect.bottom + menuHeight > window.innerHeight
+      ? Math.max(8, rect.top - menuHeight - 6)
+      : rect.bottom + 6;
+    setMoreMenu({ item, top, left });
+  };
+
+  const MoreButton = ({ item, className = "" }: { item: AccountRecord; className?: string }) => (
+    <Button
+      size="sm"
+      variant="outline"
+      className={className}
+      onClick={(event) => openMoreMenu(item, event.currentTarget)}
+      aria-haspopup="menu"
+      aria-expanded={moreMenu?.item.id === item.id}
+    >
+      <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+      更多
+    </Button>
+  );
+
+  const MoreMenuContent = ({ item }: { item: AccountRecord }) => {
+    const currentRelogin = !!relogin?.running && relogin.account_id === item.id;
+    const exportEntry = (kind: "cpa" | "grok2api") => {
+      const available = kind === "cpa" ? item.cpa_auth_available : item.grok2api_auth_available;
+      const label = kind === "cpa" ? "下载 CPA JSON" : "下载 Grok2API JSON";
+      const content = (
+        <>
+          <Download className="h-4 w-4" aria-hidden="true" />
+          {label}
+        </>
+      );
+      if (!available) {
+        return (
+          <span
+            className="flex min-h-10 cursor-not-allowed items-center gap-2 rounded-lg px-3 text-sm text-muted-foreground opacity-45"
+            title={`${label} 文件不存在`}
+          >
+            {content}
+          </span>
+        );
+      }
+      return (
+        <a
+          href={api.accountAuthDownloadUrl(item.id, kind)}
+          download
+          className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium hover:bg-muted"
+          onClick={() => setMoreMenu(null)}
+        >
+          {content}
+        </a>
+      );
+    };
+    return (
+      <div role="menu" className="space-y-1">
+        {exportEntry("cpa")}
+        {exportEntry("grok2api")}
+        <div className="my-1 border-t" />
+        <button
+          type="button"
+          role="menuitem"
+          className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={!!relogin?.running || !item.email || !item.password}
+          onClick={() => {
+            setMoreMenu(null);
+            void onRelogin(item);
+          }}
+        >
+          {currentRelogin ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <LogIn className="h-4 w-4" aria-hidden="true" />
+          )}
+          {currentRelogin ? relogin?.stage || "重新登录中" : "重新登录并刷新 SSO"}
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -584,10 +684,13 @@ export function AccountsPage() {
                         </div>
                       </div>
 
-                      <Button className="w-full" variant="outline" onClick={() => setDetail(item)}>
-                        查看详情与操作
-                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant="outline" onClick={() => setDetail(item)}>
+                          查看
+                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                        <MoreButton item={item} className="w-full" />
+                      </div>
                     </article>
                   ))}
                   {visibleCount < items.length ? (
@@ -620,7 +723,7 @@ export function AccountsPage() {
                         <th className="px-3 py-3">邮箱停用</th>
                         <th className="px-3 py-3">服务商</th>
                         <th className="px-3 py-3">耗时</th>
-                        <th className="sticky right-0 z-20 w-[90px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
+                        <th className="sticky right-0 z-20 w-[170px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -665,9 +768,12 @@ export function AccountsPage() {
                           <td className="px-3 py-3 text-muted-foreground">{item.provider || "-"}</td>
                           <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatDuration(item.duration_seconds)}</td>
                           <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
-                            <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
-                              查看
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
+                                查看
+                              </Button>
+                              <MoreButton item={item} />
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -680,6 +786,43 @@ export function AccountsPage() {
         </Card>
 
       </div>
+
+      {moreMenu ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[75] hidden cursor-default bg-transparent xl:block"
+            onClick={() => setMoreMenu(null)}
+            aria-label="关闭更多操作"
+          />
+          <div
+            className="fixed z-[76] hidden w-56 rounded-xl border bg-card p-2 shadow-2xl xl:block"
+            style={{ top: moreMenu.top, left: moreMenu.left }}
+          >
+            <MoreMenuContent item={moreMenu.item} />
+          </div>
+          <div
+            className="fixed inset-0 z-[75] flex items-end bg-slate-950/45 xl:hidden"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setMoreMenu(null);
+            }}
+          >
+            <section className="w-full rounded-t-3xl bg-card px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl">
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300" />
+              <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                <div className="min-w-0">
+                  <div className="font-medium">更多操作</div>
+                  <div className="truncate text-xs text-muted-foreground">{moreMenu.item.email}</div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => setMoreMenu(null)} aria-label="关闭更多操作">
+                  <X className="h-5 w-5" aria-hidden="true" />
+                </Button>
+              </div>
+              <MoreMenuContent item={moreMenu.item} />
+            </section>
+          </div>
+        </>
+      ) : null}
 
       {detail ? (
         <div
