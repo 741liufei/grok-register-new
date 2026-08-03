@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.web.application import _load_account_auth_json
+from backend.web.application import _find_account_auth_file, _load_account_auth_json
 
 
 class WebAuthJsonTests(unittest.TestCase):
@@ -36,10 +36,23 @@ class WebAuthJsonTests(unittest.TestCase):
             self.assertEqual(Path(g2a["path"]), g2a_path)
             self.assertEqual(json.loads(cpa["content"])["email"], "user@outlook.com")
             self.assertEqual(json.loads(g2a["content"])["accounts"][0]["email"], "user@outlook.com")
+            self.assertEqual(_find_account_auth_file(record, config, "cpa"), cpa_path)
 
     def test_rejects_unknown_kind(self):
         with self.assertRaises(ValueError):
             _load_account_auth_json({}, {}, "other")
+
+    def test_file_finder_does_not_parse_content_for_download(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            invalid_json = root / "xai-user@example.com.json"
+            invalid_json.write_text("not parsed by download path", encoding="utf-8")
+            record = {"email": "user@example.com", "cpa_auth_path": str(invalid_json)}
+            config = {"cpa_auth_dir": str(root)}
+
+            self.assertEqual(_find_account_auth_file(record, config, "cpa"), invalid_json)
+            with self.assertRaises(ValueError):
+                _load_account_auth_json(record, config, "cpa")
 
 
 if __name__ == "__main__":

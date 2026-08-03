@@ -365,7 +365,7 @@ def _record_auth_path(record: Dict[str, Any], kind: str) -> str:
     return ""
 
 
-def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], kind: str) -> Dict[str, Any]:
+def _find_account_auth_file(record: Dict[str, Any], raw_config: Dict[str, Any], kind: str) -> Path:
     if kind not in {"cpa", "grok2api"}:
         raise ValueError("kind 必须是 cpa 或 grok2api")
     if kind == "cpa":
@@ -398,7 +398,6 @@ def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], 
     candidates.extend(root / expected_name for root in roots)
 
     seen = set()
-    errors: List[str] = []
     for candidate in candidates:
         try:
             normalized = candidate.resolve()
@@ -410,18 +409,21 @@ def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], 
         seen.add(key)
         if not normalized.is_file():
             continue
-        try:
-            if normalized.stat().st_size > 2 * 1024 * 1024:
-                errors.append(f"{normalized.name} 超过 2 MiB")
-                continue
-            content = normalized.read_text(encoding="utf-8")
-            json.loads(content)
-            return {"kind": kind, "path": str(normalized), "content": content}
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            errors.append(f"{normalized.name}: {exc}")
+        return normalized
     label = "CPA" if kind == "cpa" else "Grok2API"
-    suffix = f"；{'；'.join(errors[:3])}" if errors else ""
-    raise FileNotFoundError(f"未找到该账号对应的 {label} JSON{suffix}")
+    raise FileNotFoundError(f"未找到该账号对应的 {label} JSON")
+
+
+def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    path = _find_account_auth_file(record, raw_config, kind)
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError(f"{path.name} 超过 2 MiB")
+        content = path.read_text(encoding="utf-8")
+        json.loads(content)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path.name}: {exc}") from exc
+    return {"kind": kind, "path": str(path), "content": content}
 
 
 def _failure_screenshot_file(record: Dict[str, Any]) -> tuple[Path, str]:
@@ -674,17 +676,17 @@ def create_app() -> FastAPI:
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
         try:
-            payload = _load_account_auth_json(rows[0], gr.config, normalized_kind)
+            path = _find_account_auth_file(rows[0], gr.config, normalized_kind)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        path = Path(payload["path"])
         return FileResponse(
             path,
             media_type="application/json",
             filename=path.name,
             content_disposition_type="attachment",
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.post("/api/accounts/delete")

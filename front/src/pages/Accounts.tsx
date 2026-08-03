@@ -20,6 +20,7 @@ import { copyText, formatDuration, maskSecret } from "@/lib/utils";
 import {
   Badge,
   Button,
+  buttonVariants,
   Card,
   CardContent,
   CardDescription,
@@ -81,7 +82,7 @@ function AccountDetails({
   onCopy: (value: string, label: string) => void;
   onCopyAuthJson: (kind: "cpa" | "grok2api") => void;
   onDownloadAuthJson: (kind: "cpa" | "grok2api") => void;
-  authJsonLoading: "" | "copy-cpa" | "copy-grok2api" | "download-cpa" | "download-grok2api";
+  authJsonLoading: "" | "copy-cpa" | "copy-grok2api";
 }) {
   const fields: Array<[string, string]> = [
     ["邮箱", detail.email],
@@ -160,12 +161,8 @@ function AccountDetails({
             )}
             复制 CPA JSON
           </Button>
-          <Button variant="outline" onClick={() => onDownloadAuthJson("cpa")} disabled={!!authJsonLoading}>
-            {authJsonLoading === "download-cpa" ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Download className="h-4 w-4" aria-hidden="true" />
-            )}
+          <Button variant="outline" onClick={() => onDownloadAuthJson("cpa")}>
+            <Download className="h-4 w-4" aria-hidden="true" />
             下载 CPA JSON
           </Button>
           <Button
@@ -180,12 +177,8 @@ function AccountDetails({
             )}
             复制 Grok2API JSON
           </Button>
-          <Button variant="outline" onClick={() => onDownloadAuthJson("grok2api")} disabled={!!authJsonLoading}>
-            {authJsonLoading === "download-grok2api" ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Download className="h-4 w-4" aria-hidden="true" />
-            )}
+          <Button variant="outline" onClick={() => onDownloadAuthJson("grok2api")}>
+            <Download className="h-4 w-4" aria-hidden="true" />
             下载 Grok2API JSON
           </Button>
         </div>
@@ -237,9 +230,7 @@ export function AccountsPage() {
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<AccountRecord | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [authJsonLoading, setAuthJsonLoading] = useState<
-    "" | "copy-cpa" | "copy-grok2api" | "download-cpa" | "download-grok2api"
-  >("");
+  const [authJsonLoading, setAuthJsonLoading] = useState<"" | "copy-cpa" | "copy-grok2api">("");
   const [visibleCount, setVisibleCount] = useState(50);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
@@ -322,25 +313,18 @@ export function AccountsPage() {
     }
   };
 
-  const onDownloadAuthJson = async (kind: "cpa" | "grok2api") => {
-    if (!detail) return;
-    setAuthJsonLoading(`download-${kind}` as "download-cpa" | "download-grok2api");
-    try {
-      const result = await api.downloadAccountAuthJson(detail.id, kind);
-      const url = URL.createObjectURL(result.blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = result.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      showToast(`已下载${kind === "cpa" ? "CPA JSON" : "Grok2API JSON"}`, "success");
-    } catch (err: any) {
-      showToast(err.message || "下载授权 JSON 失败", "error");
-    } finally {
-      setAuthJsonLoading("");
-    }
+  const startAuthDownload = (accountId: number, kind: "cpa" | "grok2api") => {
+    const link = document.createElement("a");
+    link.href = api.accountAuthDownloadUrl(accountId, kind);
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showToast(`已提交${kind === "cpa" ? "CPA" : "Grok2API"}导出`, "success");
+  };
+
+  const onDownloadAuthJson = (kind: "cpa" | "grok2api") => {
+    if (detail) startAuthDownload(detail.id, kind);
   };
 
   const onDelete = async () => {
@@ -490,10 +474,28 @@ export function AccountsPage() {
                         </div>
                       </div>
 
-                      <Button variant="outline" className="w-full justify-between" onClick={() => setDetail(item)}>
-                        查看账号详情
-                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                      </Button>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button variant="outline" onClick={() => setDetail(item)}>
+                          查看
+                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                        <a
+                          href={api.accountAuthDownloadUrl(item.id, "cpa")}
+                          download
+                          className={buttonVariants({ variant: "outline", size: "sm" })}
+                        >
+                          <Download className="h-4 w-4" aria-hidden="true" />
+                          CPA
+                        </a>
+                        <a
+                          href={api.accountAuthDownloadUrl(item.id, "grok2api")}
+                          download
+                          className={buttonVariants({ variant: "outline", size: "sm" })}
+                        >
+                          <Download className="h-4 w-4" aria-hidden="true" />
+                          Grok2API
+                        </a>
+                      </div>
                     </article>
                   ))}
                   {visibleCount < items.length ? (
@@ -526,7 +528,7 @@ export function AccountsPage() {
                         <th className="px-3 py-3">邮箱停用</th>
                         <th className="px-3 py-3">服务商</th>
                         <th className="px-3 py-3">耗时</th>
-                        <th className="sticky right-0 z-20 w-20 border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
+                        <th className="sticky right-0 z-20 w-[270px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -571,9 +573,27 @@ export function AccountsPage() {
                           <td className="px-3 py-3 text-muted-foreground">{item.provider || "-"}</td>
                           <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatDuration(item.duration_seconds)}</td>
                           <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
-                            <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
-                              查看
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>查看</Button>
+                              <a
+                                href={api.accountAuthDownloadUrl(item.id, "cpa")}
+                                download
+                                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                                title="导出 CPA JSON"
+                              >
+                                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                                CPA
+                              </a>
+                              <a
+                                href={api.accountAuthDownloadUrl(item.id, "grok2api")}
+                                download
+                                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                                title="导出 Grok2API JSON"
+                              >
+                                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                                Grok2API
+                              </a>
+                            </div>
                           </td>
                         </tr>
                       ))}

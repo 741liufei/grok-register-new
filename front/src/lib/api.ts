@@ -142,26 +142,8 @@ export const api = {
     request<{ ok: boolean; kind: "cpa" | "grok2api"; path: string; content: string }>(
       `/api/accounts/${id}/auth-json/${kind}`
     ),
-  downloadAccountAuthJson: async (id: number, kind: "cpa" | "grok2api") => {
-    const response = await fetch(`/api/accounts/${id}/auth-json/${kind}/download`);
-    if (!response.ok) {
-      let message = `下载失败 (${response.status})`;
-      try {
-        const data = await response.json();
-        message = data?.detail || data?.error || message;
-      } catch {
-        // Keep the HTTP fallback when the response is not JSON.
-      }
-      throw new Error(message);
-    }
-    const disposition = response.headers.get("Content-Disposition") || "";
-    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-    const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
-    const filename = utf8Match
-      ? decodeURIComponent(utf8Match[1])
-      : plainMatch?.[1] || `${kind}-auth.json`;
-    return { blob: await response.blob(), filename };
-  },
+  accountAuthDownloadUrl: (id: number, kind: "cpa" | "grok2api") =>
+    `/api/accounts/${id}/auth-json/${kind}/download`,
   deleteAccounts: (ids: number[], deleteFiles = true) =>
     request<{ ok: boolean; deleted: number; deleted_files: number; side_lines: number; file_errors: string[] }>(
       "/api/accounts/delete",
