@@ -29,6 +29,8 @@ export type AccountRecord = {
   auth_path: string;
   cpa_auth_path: string;
   grok2api_auth_path: string;
+  cpa_auth_available: boolean;
+  grok2api_auth_available: boolean;
   email_account_id: string;
   email_disable_status: string;
   email_disabled_at: string;

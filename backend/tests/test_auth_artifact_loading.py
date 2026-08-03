@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.web.application import _find_account_auth_file, _load_account_auth_json
+from backend.web.application import _find_account_auth_file, _load_account_auth_json, _stream_file
 
 
 class WebAuthJsonTests(unittest.TestCase):
@@ -53,6 +53,12 @@ class WebAuthJsonTests(unittest.TestCase):
             self.assertEqual(_find_account_auth_file(record, config, "cpa"), invalid_json)
             with self.assertRaises(ValueError):
                 _load_account_auth_json(record, config, "cpa")
+
+    def test_stream_file_uses_incremental_chunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_bytes(b"abcdefghij")
+            self.assertEqual(list(_stream_file(path, chunk_size=4)), [b"abcd", b"efgh", b"ij"])
 
 
 if __name__ == "__main__":

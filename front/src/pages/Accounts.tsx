@@ -67,6 +67,42 @@ function emailDisableLabel(status: string) {
   return labels[status] || status || "-";
 }
 
+function AuthExportLink({
+  item,
+  kind,
+  variant = "ghost",
+}: {
+  item: AccountRecord;
+  kind: "cpa" | "grok2api";
+  variant?: "ghost" | "outline";
+}) {
+  const available = kind === "cpa" ? item.cpa_auth_available : item.grok2api_auth_available;
+  const label = kind === "cpa" ? "CPA" : "Grok2API";
+  if (!available) {
+    return (
+      <span
+        className={buttonVariants({ variant, size: "sm", className: "cursor-not-allowed opacity-40" })}
+        title={`${label} 文件不存在`}
+        aria-disabled="true"
+      >
+        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={api.accountAuthDownloadUrl(item.id, kind)}
+      download
+      className={buttonVariants({ variant, size: "sm" })}
+      title={`导出 ${label} JSON`}
+    >
+      <Download className="h-3.5 w-3.5" aria-hidden="true" />
+      {label}
+    </a>
+  );
+}
+
 function AccountDetails({
   detail,
   showPassword,
@@ -324,7 +360,13 @@ export function AccountsPage() {
   };
 
   const onDownloadAuthJson = (kind: "cpa" | "grok2api") => {
-    if (detail) startAuthDownload(detail.id, kind);
+    if (!detail) return;
+    const available = kind === "cpa" ? detail.cpa_auth_available : detail.grok2api_auth_available;
+    if (!available) {
+      showToast(`${kind === "cpa" ? "CPA" : "Grok2API"} 文件不存在`, "error");
+      return;
+    }
+    startAuthDownload(detail.id, kind);
   };
 
   const onDelete = async () => {
@@ -479,22 +521,8 @@ export function AccountsPage() {
                           查看
                           <ChevronRight className="h-4 w-4" aria-hidden="true" />
                         </Button>
-                        <a
-                          href={api.accountAuthDownloadUrl(item.id, "cpa")}
-                          download
-                          className={buttonVariants({ variant: "outline", size: "sm" })}
-                        >
-                          <Download className="h-4 w-4" aria-hidden="true" />
-                          CPA
-                        </a>
-                        <a
-                          href={api.accountAuthDownloadUrl(item.id, "grok2api")}
-                          download
-                          className={buttonVariants({ variant: "outline", size: "sm" })}
-                        >
-                          <Download className="h-4 w-4" aria-hidden="true" />
-                          Grok2API
-                        </a>
+                        <AuthExportLink item={item} kind="cpa" variant="outline" />
+                        <AuthExportLink item={item} kind="grok2api" variant="outline" />
                       </div>
                     </article>
                   ))}
@@ -575,24 +603,8 @@ export function AccountsPage() {
                           <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
                             <div className="flex items-center gap-1">
                               <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>查看</Button>
-                              <a
-                                href={api.accountAuthDownloadUrl(item.id, "cpa")}
-                                download
-                                className={buttonVariants({ variant: "ghost", size: "sm" })}
-                                title="导出 CPA JSON"
-                              >
-                                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                                CPA
-                              </a>
-                              <a
-                                href={api.accountAuthDownloadUrl(item.id, "grok2api")}
-                                download
-                                className={buttonVariants({ variant: "ghost", size: "sm" })}
-                                title="导出 Grok2API JSON"
-                              >
-                                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                                Grok2API
-                              </a>
+                              <AuthExportLink item={item} kind="cpa" />
+                              <AuthExportLink item={item} kind="grok2api" />
                             </div>
                           </td>
                         </tr>

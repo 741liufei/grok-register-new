@@ -15,11 +15,11 @@ import secrets
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -302,6 +302,13 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
     item["success"] = bool(item.get("success"))
     item["cpa_enabled"] = bool(item.get("cpa_enabled"))
     item["sso_saved"] = bool(item.get("sso_saved"))
+    raw_config = _gr().config
+    for kind in ("cpa", "grok2api"):
+        try:
+            _find_account_auth_file(item, raw_config, kind)
+            item[f"{kind}_auth_available"] = True
+        except (FileNotFoundError, OSError, ValueError):
+            item[f"{kind}_auth_available"] = False
     item["screenshot_url"] = (
         f"/api/accounts/{item.get('id')}/failure-screenshot"
         if str(item.get("screenshot_path") or "").strip()
@@ -424,6 +431,13 @@ def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], 
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{path.name}: {exc}") from exc
     return {"kind": kind, "path": str(path), "content": content}
+
+
+def _stream_file(path: Path, chunk_size: int = 65536) -> Iterator[bytes]:
+    """按固定块读取文件，让响应在首块就绪后立即进入浏览器下载队列。"""
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_size):
+            yield chunk
 
 
 def _failure_screenshot_file(record: Dict[str, Any]) -> tuple[Path, str]:
@@ -666,7 +680,7 @@ def create_app() -> FastAPI:
         return {"ok": True, **payload}
 
     @app.get("/api/accounts/{account_id}/auth-json/{kind}/download")
-    def api_account_auth_json_download(account_id: int, kind: str) -> FileResponse:
+    def api_account_auth_json_download(account_id: int, kind: str) -> StreamingResponse:
         normalized_kind = str(kind or "").strip().lower()
         if normalized_kind not in {"cpa", "grok2api"}:
             raise HTTPException(status_code=400, detail="kind 必须是 cpa 或 grok2api")
@@ -681,12 +695,16 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return FileResponse(
-            path,
+        file_size = path.stat().st_size
+        return StreamingResponse(
+            _stream_file(path),
             media_type="application/json",
-            filename=path.name,
-            content_disposition_type="attachment",
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Content-Disposition": f'attachment; filename="{path.name}"',
+                "Content-Length": str(file_size),
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     @app.post("/api/accounts/delete")
