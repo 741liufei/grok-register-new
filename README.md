@@ -4,6 +4,18 @@
 
 [部署文档](DEPLOYMENT.md) · [Web 说明](WEB.md)
 
+## 界面预览
+
+### 仪表盘
+
+![Grok Register 仪表盘](docs/images/dashboard.png)
+
+### 注册台与账号管理
+
+| 启动注册 | 账号管理 |
+| --- | --- |
+| ![启动注册页面](docs/images/register.png) | ![账号管理页面](docs/images/accounts.png) |
+
 ## 功能
 
 - Web 控制台：任务进度、实时日志、账号管理和系统设置
@@ -208,6 +220,7 @@ front/                  React 前端
 backend/                FastAPI 后端和注册流程
 backend/tests/          后端测试
 docker/                 容器启动与浏览器验证
+docs/images/            Web 界面截图
 .github/workflows/      GitHub Actions
 data/                   运行数据
 logs/                   运行日志
