@@ -6,4 +6,4 @@ if [[ -x .venv/bin/python ]]; then
 else
   PY="python3"
 fi
-exec "$PY" -m backend.server "$@"
+exec "$PY" -m backend.web.cli "$@"

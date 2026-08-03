@@ -146,7 +146,7 @@ cp config.example.json config.json
 Windows 启动：
 
 ```powershell
-.venv\Scripts\python.exe -m backend.server --host 127.0.0.1 --port 8787
+.venv\Scripts\python.exe -m backend.web.cli --host 127.0.0.1 --port 8787
 ```
 
 ## 主要配置
@@ -243,7 +243,13 @@ docker compose up -d --force-recreate
 
 ```text
 front/                  React 前端
-backend/                FastAPI 后端和注册流程
+backend/                Python 后端
+  web/                  FastAPI、认证与任务调度
+  registration/         注册编排、仓储和结果产物
+  automation/           Camoufox 浏览器运行时
+  integrations/         代理、连通性和授权交换
+  mailbox/              邮箱渠道适配
+  shared/               公共路径等基础设施
 backend/tests/          后端测试
 docker/                 容器启动与浏览器验证
 docs/images/            Web 界面截图

@@ -7,21 +7,30 @@
 - 管理账号（筛选、复制、删除记录与关联文件）
 - 编辑注册核心使用的 `config.json`
 
-## 结构说明
+## 后端架构
 
-- `backend/registration_core.py` 仅保留 Web 后台需要的注册核心
-- 账号注册 / SSO→auth 转换实现由 Web 后台直接复用
-- 后端使用单进程 FastAPI + uvicorn workers=1，数据继续使用 SQLite
+后端按职责拆分，Web 层只负责协议和控制台状态，不直接承载邮箱或浏览器实现：
+
+| 包 | 职责 |
+| --- | --- |
+| `backend.web` | FastAPI 路由、管理员会话、配置接口和任务协调 |
+| `backend.registration` | 注册编排、页面步骤、结果仓储和关联产物 |
+| `backend.automation` | Camoufox 生命周期及页面操作适配 |
+| `backend.integrations` | 代理、连通性检查和授权凭据交换 |
+| `backend.mailbox` | 各邮箱渠道与验证码解析 |
+| `backend.shared` | 项目路径等跨包运行时基础设施 |
+
+后端使用单进程 FastAPI + `uvicorn workers=1`，注册结果继续使用 SQLite WAL。
 
 ## 复用关系
 
 | 能力 | 来源 |
 | --- | --- |
-| 注册主流程 | `backend.registration_core.run_registration` |
-| 停止控制 | 运行时替换 `RegistrationStopController`（见 `backend/job_manager.py`） |
+| 注册主流程 | `backend.registration.engine.run_registration` |
+| 停止控制 | `backend.web.jobs.RegistrationJobCoordinator` 与 `RegistrationStopController` |
 | 日志 | 运行时包装 `registration_log` |
-| 结果存储 | `RegistrationStore` / `get_registration_store()` |
-| 删除关联文件 | `registration_files` 中的纯函数工具 |
+| 结果存储 | `RegistrationRepository` / `get_registration_repository()` |
+| 删除关联文件 | `backend.registration.artifacts` |
 | 配置 | `load_config` / `save_config` / `config.json` |
 
 ## 启动
@@ -36,7 +45,7 @@ cd front && npm install && npm run build && cd ..
 # 启动 Web
 ./start-web.sh
 # 或
-.venv/bin/python -m backend.server --host 127.0.0.1 --port 8787
+.venv/bin/python -m backend.web.cli --host 127.0.0.1 --port 8787
 ```
 
 ### 公网账号密码登录
@@ -55,10 +64,12 @@ front/                 # React + Tailwind（shadcn 风格）前端
   src/                 # 前端源码
   dist/                # 生产构建产物
 backend/               # FastAPI 后端与注册核心
-  server.py            # 入口
-  app.py               # FastAPI 路由
-  job_manager.py       # 后台注册任务与日志 hooks
-  email_providers/     # 邮箱服务商
+  web/                 # HTTP 应用、CLI 与后台任务
+  registration/        # 注册编排、流程、仓储与产物
+  automation/          # 浏览器运行时与页面适配
+  integrations/        # 外部服务与授权交换
+  mailbox/             # 邮箱渠道
+  shared/              # 公共运行时基础设施
 data/                  # 账号、授权和认证运行数据
 logs/                  # 运行日志
 backend/tests/         # 后端单元测试
@@ -100,6 +111,6 @@ sudo systemctl reload caddy
 请确保 Web 服务常驻监听：
 
 ```bash
-.venv/bin/python -m backend.server --host 127.0.0.1 --port 8787
+.venv/bin/python -m backend.web.cli --host 127.0.0.1 --port 8787
 # 或 0.0.0.0:8787
 ```
