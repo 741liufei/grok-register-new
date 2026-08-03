@@ -132,7 +132,7 @@ export function Layout({ jobRunning, onLogout }: { jobRunning?: boolean; onLogou
           </div>
         </header>
 
-        <header className="sticky top-0 z-30 hidden min-h-16 items-center justify-between border-b bg-card/90 px-8 backdrop-blur lg:flex">
+        <header className="sticky top-0 z-30 hidden min-h-16 items-center justify-between border-b bg-card/90 px-6 backdrop-blur lg:flex">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>工作台</span>
             <span>/</span>
@@ -159,7 +159,7 @@ export function Layout({ jobRunning, onLogout }: { jobRunning?: boolean; onLogou
 
         <main
           id="main-content"
-          className="mx-auto w-full max-w-[1440px] px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 sm:pt-6 lg:px-8 lg:pb-10 lg:pt-8"
+          className="mx-auto w-full max-w-[1920px] px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 sm:pt-6 lg:px-6 lg:pb-10 lg:pt-8"
         >
           <Outlet />
         </main>
