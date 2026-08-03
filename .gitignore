@@ -1,0 +1,62 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+accounts_*.txt
+mail_credentials.txt
+sso_pending.txt
+*.txt
+!requirements.txt
+
+config.json
+config.local.json
+config.local.*
+.env
+!.env.example
+# 本地需求与改动记录，不提交仓库
+CHANGELOG_REQUESTS.md
+# 兼容旧版根目录认证文件；新版使用 data/web_auth.json
+web_auth.json
+web_auth.tmp
+*.bak
+
+# 真实账号凭证 / OAuth token 输出，禁止提交
+auth_out.json
+auth_out/
+auth_merged.json
+*.auth.json
+xai-*.json
+g2a-*.json
+auth_403/
+sso_list.txt
+token.json
+
+*.log
+# 运行数据与日志与前后端代码分离
+data/*
+!data/README.md
+logs/*
+!logs/README.md
+# consent Next-Action 本地缓存（运行时写入，勿提交）
+.next_action_id.cache
+# 调试产物（页面 dump 可能含真实账号信息）
+artifacts/
+
+.DS_Store
+.idea/
+.vscode/
+DrissionPage/
+autoPortData/
+
+# 归档目录（冗余/调试文件，待确认后删除）
+_archive/
+# 本地 IDE 配置
+.claude/
+
+# Web console
+front/node_modules/

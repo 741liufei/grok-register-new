@@ -1,0 +1,36 @@
+services:
+  grok-register:
+    image: ${GROK_REGISTER_IMAGE:-grok-register:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grok-register
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${GROK_WEB_PORT:-8787}:8787"
+    environment:
+      TZ: ${TZ:-UTC}
+      GROK_WEB_COOKIE_SECURE: ${GROK_WEB_COOKIE_SECURE:-0}
+      GROK_FORCE_HEADED: "1"
+      GROK_CONFIG_FILE: /app/data/config.json
+      GROK_DOCKER_PROXY_HOST: host.docker.internal
+      XVFB_SCREEN: ${XVFB_SCREEN:-1920x1080x24}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    shm_size: ${GROK_SHM_SIZE:-1gb}
+    security_opt:
+      - seccomp=unconfined
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+front/node_modules
+front/dist
+data
+logs
+config.json
+web_auth.json
+.next_action_id.cache
+artifacts
+*.log
+*.bak
