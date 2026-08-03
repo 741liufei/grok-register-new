@@ -81,6 +81,16 @@ export type AuthState = {
   username: string;
 };
 
+export type ReloginStatus = {
+  running: boolean;
+  account_id: number;
+  email: string;
+  stage: string;
+  error: string;
+  started_at?: number | null;
+  finished_at?: number | null;
+};
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -146,6 +156,12 @@ export const api = {
     ),
   accountAuthDownloadUrl: (id: number, kind: "cpa" | "grok2api") =>
     `/api/accounts/${id}/auth-json/${kind}/download`,
+  startRelogin: (id: number) =>
+    request<{ ok: boolean; relogin: ReloginStatus }>(`/api/accounts/${id}/relogin`, {
+      method: "POST",
+    }),
+  reloginStatus: () =>
+    request<{ ok: boolean; relogin: ReloginStatus }>("/api/accounts/relogin/status"),
   deleteAccounts: (ids: number[], deleteFiles = true) =>
     request<{ ok: boolean; deleted: number; deleted_files: number; side_lines: number; file_errors: string[] }>(
       "/api/accounts/delete",

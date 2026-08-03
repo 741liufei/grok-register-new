@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .jobs import job_coordinator
+from .relogin_jobs import relogin_coordinator
 from backend.shared.paths import DATA_ROOT, PROJECT_ROOT, STATIC_ROOT
 
 APP_DIR = PROJECT_ROOT
@@ -447,8 +448,11 @@ def _failure_screenshot_file(record: Dict[str, Any]) -> tuple[Path, str]:
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
         path = APP_DIR / path
-    screenshot_root = DATA_DIR / "screenshots" / "registration-failures"
-    if not _path_within(path, [screenshot_root]) or not path.is_file():
+    screenshot_roots = [
+        DATA_DIR / "screenshots" / "registration-failures",
+        DATA_DIR / "screenshots" / "relogin-failures",
+    ]
+    if not _path_within(path, screenshot_roots) or not path.is_file():
         raise FileNotFoundError("失败截图文件不存在")
     media_types = {
         ".png": "image/png",
@@ -638,6 +642,10 @@ def create_app() -> FastAPI:
             "items": [_serialize_record(row) for row in page],
         }
 
+    @app.get("/api/accounts/relogin/status")
+    def api_account_relogin_status() -> Dict[str, Any]:
+        return {"ok": True, "relogin": relogin_coordinator.status()}
+
     @app.get("/api/accounts/{account_id}")
     def api_account_detail(account_id: int) -> Dict[str, Any]:
         gr = _gr()
@@ -646,6 +654,20 @@ def create_app() -> FastAPI:
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
         return {"ok": True, "item": _serialize_record(rows[0])}
+
+    @app.post("/api/accounts/{account_id}/relogin")
+    def api_account_relogin(account_id: int) -> Dict[str, Any]:
+        if job_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="注册任务运行中，请等待任务结束后重新登录")
+        try:
+            status = relogin_coordinator.start(account_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"ok": True, "relogin": status}
 
     @app.get("/api/accounts/{account_id}/failure-screenshot")
     def api_account_failure_screenshot(account_id: int) -> FileResponse:
@@ -794,6 +816,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/job/start")
     def api_job_start(body: StartJobBody) -> Dict[str, Any]:
+        if relogin_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="账号重新登录中，请等待完成后再启动注册")
         gr = _gr()
         gr.load_config()
         if body.config:

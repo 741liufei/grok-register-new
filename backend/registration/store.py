@@ -284,6 +284,90 @@ class RegistrationRepository:
         by_id = {int(row["id"]): dict(row) for row in rows}
         return [by_id[item_id] for item_id in normalized if item_id in by_id]
 
+    def update_relogin_result(
+        self,
+        account_id: int,
+        *,
+        account_file: str = "",
+        cpa_detail: Optional[Dict[str, Any]] = None,
+        status: str = "success",
+        error: str = "",
+        screenshot_path: str = "",
+    ) -> bool:
+        """记录重新登录结果，并在成功时刷新授权文件路径。"""
+        try:
+            normalized_id = int(account_id)
+        except (TypeError, ValueError):
+            return False
+        if normalized_id <= 0:
+            return False
+        detail = dict(cpa_detail or {})
+        relogin_status = str(status or "failed").strip().lower()
+        now = self.now_text()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT extra_json FROM registration_results WHERE id = ?",
+                (normalized_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                extra = json.loads(str(row["extra_json"] or "{}"))
+                if not isinstance(extra, dict):
+                    extra = {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                extra = {}
+            extra.update(
+                {
+                    "relogin_status": relogin_status,
+                    "relogin_at": now,
+                    "relogin_error": str(error or ""),
+                }
+            )
+            values: Dict[str, Any] = {
+                "extra_json": json.dumps(extra, ensure_ascii=False, sort_keys=True),
+                "id": normalized_id,
+            }
+            assignments = ["extra_json = :extra_json"]
+            if screenshot_path:
+                assignments.append("screenshot_path = :screenshot_path")
+                values["screenshot_path"] = str(screenshot_path)
+            if relogin_status in {"success", "partial"} and account_file:
+                auth_info = detail.get("auth_info", "")
+                if isinstance(auth_info, (list, tuple, set)):
+                    auth_info = "\n".join(str(item) for item in auth_info if str(item).strip())
+                values.update(
+                    {
+                        "account_file": str(account_file or ""),
+                        "sso_saved": 1,
+                        "cpa_enabled": 1 if bool(detail.get("enabled")) else 0,
+                        "cpa_status": str(detail.get("status") or "not_attempted"),
+                        "auth_info": str(auth_info or ""),
+                        "auth_path": str(detail.get("auth_path") or ""),
+                        "cpa_auth_path": str(detail.get("cpa_auth_path") or ""),
+                        "grok2api_auth_path": str(detail.get("grok2api_auth_path") or ""),
+                    }
+                )
+                assignments.extend(
+                    [
+                        "account_file = :account_file",
+                        "sso_saved = :sso_saved",
+                        "cpa_enabled = :cpa_enabled",
+                        "cpa_status = :cpa_status",
+                        "auth_info = :auth_info",
+                        "auth_path = :auth_path",
+                        "cpa_auth_path = :cpa_auth_path",
+                        "grok2api_auth_path = :grok2api_auth_path",
+                    ]
+                )
+                if relogin_status == "success" and not screenshot_path:
+                    assignments.append("screenshot_path = ''")
+            cursor = conn.execute(
+                f"UPDATE registration_results SET {', '.join(assignments)} WHERE id = :id",
+                values,
+            )
+            return bool(cursor.rowcount)
+
     def delete_results(self, ids: Iterable[int | str]) -> List[Dict[str, Any]]:
         """删除指定记录，返回实际删除前的记录快照。"""
         records = self.get_results_by_ids(ids)

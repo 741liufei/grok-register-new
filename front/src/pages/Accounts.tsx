@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   Loader2,
+  LogIn,
   Mail,
   Power,
   RefreshCw,
@@ -15,7 +16,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { api, type AccountRecord } from "@/lib/api";
+import { api, type AccountRecord, type ReloginStatus } from "@/lib/api";
 import { copyText, formatDuration, maskSecret } from "@/lib/utils";
 import {
   Badge,
@@ -111,6 +112,8 @@ function AccountDetails({
   onCopyAuthJson,
   onDownloadAuthJson,
   authJsonLoading,
+  onRelogin,
+  reloginRunning,
 }: {
   detail: AccountRecord;
   showPassword: boolean;
@@ -119,6 +122,8 @@ function AccountDetails({
   onCopyAuthJson: (kind: "cpa" | "grok2api") => void;
   onDownloadAuthJson: (kind: "cpa" | "grok2api") => void;
   authJsonLoading: "" | "copy-cpa" | "copy-grok2api";
+  onRelogin: (item: AccountRecord) => void;
+  reloginRunning: boolean;
 }) {
   const fields: Array<[string, string]> = [
     ["邮箱", detail.email],
@@ -252,6 +257,19 @@ function AccountDetails({
           <Copy className="h-4 w-4" aria-hidden="true" />
           复制账号
         </Button>
+        <Button
+          className="col-span-2"
+          variant="outline"
+          onClick={() => onRelogin(detail)}
+          disabled={reloginRunning || !detail.email || !detail.password}
+        >
+          {reloginRunning ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <LogIn className="h-4 w-4" aria-hidden="true" />
+          )}
+          {reloginRunning ? "正在重新登录" : "重新登录并刷新 SSO"}
+        </Button>
       </div>
     </div>
   );
@@ -268,6 +286,7 @@ export function AccountsPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [authJsonLoading, setAuthJsonLoading] = useState<"" | "copy-cpa" | "copy-grok2api">("");
   const [visibleCount, setVisibleCount] = useState(50);
+  const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
   });
@@ -307,6 +326,32 @@ export function AccountsPage() {
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let lastRunning = false;
+    const check = async () => {
+      try {
+        const result = await api.reloginStatus();
+        if (!active) return;
+        const next = result.relogin;
+        setRelogin(next);
+        if (lastRunning && !next.running) {
+          await load();
+          showToast(next.error ? `重新登录失败：${next.error}` : "重新登录完成，授权文件已刷新", next.error ? "error" : "success");
+        }
+        lastRunning = next.running;
+      } catch {
+        // 状态轮询失败不覆盖账号列表操作。
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -386,6 +431,21 @@ export function AccountsPage() {
     }
   };
 
+  const onRelogin = async (item: AccountRecord) => {
+    if (!item.email || !item.password) {
+      showToast("该记录缺少邮箱或密码", "error");
+      return;
+    }
+    if (!window.confirm(`使用已保存的账号密码重新登录 ${item.email}，刷新 SSO 和授权文件？`)) return;
+    try {
+      const result = await api.startRelogin(item.id);
+      setRelogin(result.relogin);
+      showToast("已启动重新登录，请稍候", "success");
+    } catch (err: any) {
+      showToast(err.message || "启动重新登录失败", "error");
+    }
+  };
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <PageHeader
@@ -404,6 +464,14 @@ export function AccountsPage() {
           </>
         }
       />
+
+      {relogin?.running ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          <span className="font-medium">正在重新登录 {relogin.email}</span>
+          <span className="text-blue-700">{relogin.stage}</span>
+        </div>
+      ) : null}
 
       <Card>
         <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[160px_190px_minmax(0,1fr)_auto]">
@@ -449,7 +517,7 @@ export function AccountsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.85fr)]">
+      <div>
         <Card className="min-w-0 overflow-hidden">
           <CardHeader className="flex-row items-center justify-between gap-3">
             <div>
@@ -516,14 +584,10 @@ export function AccountsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <Button variant="outline" onClick={() => setDetail(item)}>
-                          查看
-                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                        </Button>
-                        <AuthExportLink item={item} kind="cpa" variant="outline" />
-                        <AuthExportLink item={item} kind="grok2api" variant="outline" />
-                      </div>
+                      <Button className="w-full" variant="outline" onClick={() => setDetail(item)}>
+                        查看详情与操作
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      </Button>
                     </article>
                   ))}
                   {visibleCount < items.length ? (
@@ -556,7 +620,7 @@ export function AccountsPage() {
                         <th className="px-3 py-3">邮箱停用</th>
                         <th className="px-3 py-3">服务商</th>
                         <th className="px-3 py-3">耗时</th>
-                        <th className="sticky right-0 z-20 w-[270px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
+                        <th className="sticky right-0 z-20 w-[90px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -601,11 +665,9 @@ export function AccountsPage() {
                           <td className="px-3 py-3 text-muted-foreground">{item.provider || "-"}</td>
                           <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatDuration(item.duration_seconds)}</td>
                           <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
-                            <div className="flex items-center gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>查看</Button>
-                              <AuthExportLink item={item} kind="cpa" />
-                              <AuthExportLink item={item} kind="grok2api" />
-                            </div>
+                            <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
+                              查看
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -617,32 +679,11 @@ export function AccountsPage() {
           </CardContent>
         </Card>
 
-        <Card className="sticky top-24 hidden max-h-[calc(100dvh-8rem)] overflow-hidden xl:block">
-          <CardHeader>
-            <CardTitle>账号详情</CardTitle>
-            <CardDescription>选择一条记录后，可查看并复制完整字段。</CardDescription>
-          </CardHeader>
-          <CardContent className="max-h-[calc(100dvh-14rem)] overflow-auto">
-            {!detail ? (
-              <EmptyState title="未选择记录" description="从左侧表格选择一条账号记录。" />
-            ) : (
-              <AccountDetails
-                detail={detail}
-                showPassword={showPassword}
-                onTogglePassword={() => setShowPassword((value) => !value)}
-                onCopy={onCopy}
-                onCopyAuthJson={onCopyAuthJson}
-                onDownloadAuthJson={onDownloadAuthJson}
-                authJsonLoading={authJsonLoading}
-              />
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {detail ? (
         <div
-          className="fixed inset-0 z-[70] flex items-end bg-slate-950/40 xl:hidden"
+          className="fixed inset-0 z-[70] flex items-end bg-slate-950/50 sm:items-center sm:justify-center sm:p-6"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setDetail(null);
           }}
@@ -651,7 +692,7 @@ export function AccountsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-detail-title"
-            className="max-h-[92dvh] w-full overflow-hidden rounded-t-3xl bg-card shadow-2xl"
+            className="max-h-[92dvh] w-full overflow-hidden rounded-t-3xl bg-card shadow-2xl sm:max-w-4xl sm:rounded-3xl"
           >
             <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-slate-300" />
             <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-card px-4 py-3">
@@ -672,6 +713,8 @@ export function AccountsPage() {
                 onCopyAuthJson={onCopyAuthJson}
                 onDownloadAuthJson={onDownloadAuthJson}
                 authJsonLoading={authJsonLoading}
+                onRelogin={onRelogin}
+                reloginRunning={!!relogin?.running && relogin.account_id === detail.id}
               />
             </div>
           </section>
