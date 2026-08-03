@@ -39,6 +39,7 @@ RESULT_COLUMNS = (
     "email_disable_error",
     "failure_type",
     "failure_reason",
+    "screenshot_path",
     "account_file",
     "sso_saved",
     "nsfw_status",
@@ -94,6 +95,7 @@ class RegistrationRepository:
                     email_disable_error TEXT NOT NULL DEFAULT '',
                     failure_type TEXT NOT NULL DEFAULT '',
                     failure_reason TEXT NOT NULL DEFAULT '',
+                    screenshot_path TEXT NOT NULL DEFAULT '',
                     account_file TEXT NOT NULL DEFAULT '',
                     sso_saved INTEGER NOT NULL DEFAULT 0,
                     nsfw_status TEXT NOT NULL DEFAULT '',
@@ -121,6 +123,7 @@ class RegistrationRepository:
                 "email_disable_status": "TEXT NOT NULL DEFAULT 'not_attempted'",
                 "email_disabled_at": "TEXT NOT NULL DEFAULT ''",
                 "email_disable_error": "TEXT NOT NULL DEFAULT ''",
+                "screenshot_path": "TEXT NOT NULL DEFAULT ''",
             }
             for column, definition in migrations.items():
                 if column not in existing_columns:
@@ -141,7 +144,7 @@ class RegistrationRepository:
                 ON registration_results(email_disable_status)
                 """
             )
-            conn.execute("PRAGMA user_version = 2")
+            conn.execute("PRAGMA user_version = 3")
 
     def add_result(self, record: Dict[str, Any]) -> int:
         now = self.now_text()
@@ -180,6 +183,7 @@ class RegistrationRepository:
             "email_disable_error": str(record.get("email_disable_error") or ""),
             "failure_type": str(record.get("failure_type") or ""),
             "failure_reason": str(record.get("failure_reason") or ""),
+            "screenshot_path": str(record.get("screenshot_path") or ""),
             "account_file": str(record.get("account_file") or ""),
             "sso_saved": 1 if bool(record.get("sso_saved")) else 0,
             "nsfw_status": str(record.get("nsfw_status") or ""),

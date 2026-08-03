@@ -80,6 +80,7 @@ backend/tests/         # 后端单元测试
 - `GET /api/stats` 统计 + 任务状态
 - `GET /api/accounts` 账号列表
 - `POST /api/accounts/delete` 删除记录（可选删关联文件）
+- `GET /api/accounts/{id}/failure-screenshot` 查看浏览器失败现场截图
 - `GET/PUT /api/config` 读写配置
 - `POST /api/job/start` 启动注册
 - `POST /api/job/stop` 停止注册
@@ -92,6 +93,8 @@ backend/tests/         # 后端单元测试
 设置页可启用“无头浏览器”，让 Camoufox 不显示窗口运行。该模式会处理常见无头指纹差异，但站点风控仍可能结合环境与行为判断，默认保持关闭。
 
 注册页的“终止所有 Camoufox”用于异常兜底：先请求停止当前任务，再终止 Camoufox 进程树并清理本项目创建的临时资料目录。紧急终止后，下一次手动启动注册任务才会重新允许浏览器启动。
+
+注册过程中发生页面交互、验证码、流程卡住等失败时，系统会在活动页面仍可访问的情况下保存全页截图到 `data/screenshots/registration-failures/`。截图路径随失败记录写入 SQLite，可在账号管理详情中直接预览；删除账号并勾选删除关联文件时会同步清理截图。
 
 ## Caddy 反代
 

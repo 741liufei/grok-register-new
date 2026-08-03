@@ -55,7 +55,7 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
             with sqlite3.connect(path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(registration_results)")}
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
-            self.assertEqual(version, 2)
+            self.assertEqual(version, 3)
             self.assertTrue(
                 {
                     "email_account_id",
@@ -64,6 +64,7 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
                     "email_disable_error",
                     "cpa_auth_path",
                     "grok2api_auth_path",
+                    "screenshot_path",
                 }.issubset(columns)
             )
             self.assertEqual(store.list_results()[0]["email_disable_status"], "not_applicable")
@@ -78,6 +79,7 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
                     "email_account_id": "367",
                     "email_disable_status": "success",
                     "email_disabled_at": "2026-08-01 01:02:03",
+                    "screenshot_path": "/tmp/failure.png",
                 }
             )
             store.add_result(
@@ -97,6 +99,8 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
             stats = store.stats()
             self.assertEqual(stats["email_disabled"], 1)
             self.assertEqual(stats["email_disable_failed"], 1)
+            disabled = next(row for row in store.list_results() if row["email"] == "disabled@outlook.com")
+            self.assertEqual(disabled["screenshot_path"], "/tmp/failure.png")
 
 
 if __name__ == "__main__":

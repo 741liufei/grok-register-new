@@ -301,6 +301,55 @@ def current_attempt_password(profile=None):
     return str(_rf.last_profile().get("password") or "")
 
 
+def capture_failure_screenshot(
+    *,
+    batch_id="",
+    worker_id=0,
+    email="",
+    failure_type="",
+    log_callback=None,
+):
+    """保存当前活动页面；页面不存在或已经断开时返回空路径。"""
+    current_page = _active_page()
+    if current_page is None:
+        return ""
+
+    def _safe_part(value, fallback):
+        normalized = re.sub(r"[^A-Za-z0-9._@-]+", "_", str(value or "").strip())
+        return normalized.strip("._-")[:80] or fallback
+
+    folder = os.path.join(DATA_DIR, "screenshots", "registration-failures")
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = "-".join(
+        (
+            _safe_part(batch_id, "batch"),
+            f"w{max(int(worker_id or 0), 0) + 1}",
+            _safe_part(email, "unknown"),
+            _safe_part(failure_type, "failure"),
+            stamp,
+            secrets.token_hex(2),
+        )
+    ) + ".png"
+    path = os.path.abspath(os.path.join(folder, filename))
+    try:
+        os.makedirs(folder, exist_ok=True)
+        current_page.screenshot(path=path, full_page=True)
+        if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+            return ""
+        if log_callback:
+            log_callback(f"[截图] 浏览器失败现场已保存: {path}")
+        return path
+    except Exception as exc:
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
+        if log_callback:
+            log_callback(f"[Debug] 浏览器失败截图保存失败: {exc}")
+        return ""
+
+
 def is_outlookemail_registration(provider="") -> bool:
     value = str(provider or config.get("email_provider", "") or "").strip().lower()
     return value == "outlookemail"
@@ -355,6 +404,7 @@ def persist_registration_result(
     email_disable_detail=None,
     failure_type="",
     failure_reason="",
+    screenshot_path="",
     account_file="",
     sso_saved=False,
     nsfw_status="",
@@ -416,6 +466,7 @@ def persist_registration_result(
                 "email_disable_error": disable_detail.get("error", ""),
                 "failure_type": failure_type,
                 "failure_reason": str(failure_reason or ""),
+                "screenshot_path": screenshot_path,
                 "account_file": account_file,
                 "sso_saved": sso_saved,
                 "nsfw_status": nsfw_status,
@@ -2017,6 +2068,18 @@ def run_registration(count):
         return kind
 
     def _persist_result(*, started_at, worker_id=0, **kwargs):
+        if (
+            str(kwargs.get("status") or "").strip().lower() == "failure"
+            and str(kwargs.get("failure_type") or "") != FAIL_CPA
+            and not kwargs.get("screenshot_path")
+        ):
+            kwargs["screenshot_path"] = capture_failure_screenshot(
+                batch_id=batch_id,
+                worker_id=worker_id,
+                email=str(kwargs.get("email") or ""),
+                failure_type=str(kwargs.get("failure_type") or FAIL_OTHER),
+                log_callback=registration_log,
+            )
         return persist_registration_result(
             batch_id=batch_id,
             source="web",

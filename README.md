@@ -255,6 +255,7 @@ docker/                 容器启动与浏览器验证
 docs/images/            Web 界面截图
 .github/workflows/      GitHub Actions
 data/                   运行数据
+  screenshots/          浏览器注册失败现场截图
 logs/                   运行日志
 outlookemail-data/      可选 OutlookEmail 数据
 compose.yaml            Docker Compose 配置

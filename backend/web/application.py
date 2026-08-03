@@ -302,6 +302,11 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
     item["success"] = bool(item.get("success"))
     item["cpa_enabled"] = bool(item.get("cpa_enabled"))
     item["sso_saved"] = bool(item.get("sso_saved"))
+    item["screenshot_url"] = (
+        f"/api/accounts/{item.get('id')}/failure-screenshot"
+        if str(item.get("screenshot_path") or "").strip()
+        else ""
+    )
     extra = item.get("extra_json") or "{}"
     if isinstance(extra, str):
         try:
@@ -417,6 +422,28 @@ def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], 
     label = "CPA" if kind == "cpa" else "Grok2API"
     suffix = f"；{'；'.join(errors[:3])}" if errors else ""
     raise FileNotFoundError(f"未找到该账号对应的 {label} JSON{suffix}")
+
+
+def _failure_screenshot_file(record: Dict[str, Any]) -> tuple[Path, str]:
+    raw_path = str(record.get("screenshot_path") or "").strip()
+    if not raw_path:
+        raise FileNotFoundError("该记录没有失败截图")
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = APP_DIR / path
+    screenshot_root = DATA_DIR / "screenshots" / "registration-failures"
+    if not _path_within(path, [screenshot_root]) or not path.is_file():
+        raise FileNotFoundError("失败截图文件不存在")
+    media_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    media_type = media_types.get(path.suffix.lower())
+    if not media_type:
+        raise ValueError("失败截图格式不受支持")
+    return path.resolve(), media_type
 
 
 def create_app() -> FastAPI:
@@ -603,6 +630,20 @@ def create_app() -> FastAPI:
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
         return {"ok": True, "item": _serialize_record(rows[0])}
+
+    @app.get("/api/accounts/{account_id}/failure-screenshot")
+    def api_account_failure_screenshot(account_id: int) -> FileResponse:
+        gr = _gr()
+        rows = gr.get_registration_repository().get_results_by_ids([account_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        try:
+            path, media_type = _failure_screenshot_file(rows[0])
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(path, media_type=media_type, content_disposition_type="inline")
 
     @app.get("/api/accounts/{account_id}/auth-json/{kind}")
     def api_account_auth_json(account_id: int, kind: str) -> Dict[str, Any]:

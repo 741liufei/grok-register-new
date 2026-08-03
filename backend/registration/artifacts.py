@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Set, Tuple
 
 
 _PATH_IN_TEXT_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:[\\/]|\\|/)[^\r\n\t\"']+\.(?:json|txt))",
+    r"(?P<path>(?:[A-Za-z]:[\\/]|\\|/)[^\r\n\t\"']+\.(?:json|txt|png|jpe?g|webp))",
     re.IGNORECASE,
 )
 _PROTECTED_BASENAMES = {
@@ -52,7 +52,7 @@ def _extract_paths_from_text(text: Any) -> List[str]:
             if not value:
                 continue
             lower = value.lower()
-            if not (lower.endswith(".json") or lower.endswith(".txt")):
+            if not lower.endswith((".json", ".txt", ".png", ".jpg", ".jpeg", ".webp")):
                 continue
             if value in seen:
                 continue
@@ -75,7 +75,7 @@ def collect_related_file_paths(
     safe_email = _safe_email_name(email)
 
     candidates: List[str] = []
-    for key in ("account_file", "auth_path"):
+    for key in ("account_file", "auth_path", "screenshot_path"):
         value = str(record.get(key) or "").strip()
         if value:
             candidates.append(value)

@@ -36,6 +36,8 @@ export type AccountRecord = {
   account_file: string;
   failure_type: string;
   failure_reason: string;
+  screenshot_path: string;
+  screenshot_url: string;
   nsfw_status: string;
   started_at: string;
   finished_at: string;

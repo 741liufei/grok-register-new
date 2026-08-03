@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Braces,
+  Camera,
   ChevronRight,
   Clock3,
   Copy,
@@ -100,6 +101,7 @@ function AccountDetails({
     ["邮箱停用错误", detail.email_disable_error],
     ["失败类型", detail.failure_type],
     ["失败原因", detail.failure_reason],
+    ["失败截图路径", detail.screenshot_path],
     ["Batch", detail.batch_id],
     ["来源", detail.source],
   ];
@@ -116,6 +118,24 @@ function AccountDetails({
           </Badge>
         </div>
       </div>
+
+      {detail.screenshot_url ? (
+        <div className="overflow-hidden rounded-xl border border-rose-200 bg-rose-50/50">
+          <div className="flex items-center gap-2 border-b border-rose-200 px-3 py-2 text-sm font-medium text-rose-800">
+            <Camera className="h-4 w-4" aria-hidden="true" />
+            浏览器失败现场
+          </div>
+          <a href={detail.screenshot_url} target="_blank" rel="noreferrer" title="在新窗口查看原图">
+            <img
+              src={detail.screenshot_url}
+              alt={`注册失败截图 ${detail.email || detail.id}`}
+              className="max-h-[28rem] w-full bg-slate-100 object-contain"
+              loading="lazy"
+            />
+          </a>
+          <div className="px-3 py-2 text-xs text-muted-foreground">点击截图可在新窗口查看原图</div>
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-3">
         <div className="flex items-start gap-2">
