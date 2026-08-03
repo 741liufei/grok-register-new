@@ -769,7 +769,7 @@ export function AccountsPage() {
                           <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatDuration(item.duration_seconds)}</td>
                           <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
                             <div className="flex items-center gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
+                              <Button size="sm" variant="outline" onClick={() => setDetail(item)}>
                                 查看
                               </Button>
                               <MoreButton item={item} />
