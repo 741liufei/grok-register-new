@@ -11,6 +11,7 @@ import threading
 import time
 from http.cookies import SimpleCookie
 from typing import Any, Callable, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 from backend.mailbox.utilities import extract_verification_code
 
@@ -142,7 +143,7 @@ def merge_cookie_headers(*values: str) -> str:
     return "; ".join(f"{key}={value}" for key, value in merged.items())
 
 
-def seed_session_cookie(session: Any, cookie_header: str) -> bool:
+def seed_session_cookie(session: Any, cookie_header: str, api_base: str = "") -> bool:
     """Put an existing Cookie header into the session jar.
 
     The OutlookEmail CSRF endpoint rotates the Flask session cookie. Keeping the
@@ -165,11 +166,18 @@ def seed_session_cookie(session: Any, cookie_header: str) -> bool:
             for part in text.split(";")
             if "=" in part and part.split("=", 1)[0].strip()
         ]
+    hostname = str(urlsplit(normalize_base(api_base)).hostname or "").strip() if api_base else ""
     try:
         for key, value in pairs:
             setter = getattr(session.cookies, "set", None)
             if callable(setter):
-                setter(key, value)
+                if hostname:
+                    # A leading dot keeps the seeded cookie ahead of the
+                    # host-only cookie rotated by Flask. This works for IPs,
+                    # localhost and single-label Docker service names.
+                    setter(key, value, domain=f".{hostname}", path="/")
+                else:
+                    setter(key, value)
             else:
                 session.cookies[key] = value
         return bool(pairs)
@@ -312,12 +320,13 @@ def disable_account(
                 session.proxies = proxies
             except Exception:
                 pass
-        cookie_in_jar = seed_session_cookie(session, cookie)
+        cookie_in_jar = seed_session_cookie(session, cookie, base)
+        csrf_headers = {"Accept": "application/json"}
+        if not cookie_in_jar:
+            csrf_headers["Cookie"] = cookie
         csrf_resp = session.get(
             f"{base}/api/csrf-token",
-            # curl_cffi does not send a domainless injected cookie to a
-            # single-label Docker hostname such as "outlook-email".
-            headers={"Accept": "application/json", "Cookie": cookie},
+            headers=csrf_headers,
             timeout=15,
         )
         if int(getattr(csrf_resp, "status_code", 0) or 0) in (401, 403):

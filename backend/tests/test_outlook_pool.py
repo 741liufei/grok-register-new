@@ -113,7 +113,7 @@ class OutlookEmailDisableTests(unittest.TestCase):
         self.assertEqual(len(self.server["put_calls"]), 1)
         self.assertEqual(
             self.server["csrf_headers"],
-            [{"Accept": "application/json", "Cookie": "session=session-1"}],
+            [{"Accept": "application/json"}],
         )
         request = self.server["put_calls"][0]
         self.assertTrue(request["url"].endswith("/api/accounts/367"))
@@ -133,11 +133,30 @@ class OutlookEmailDisableTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(self.server["login_calls"], 1)
-        self.assertEqual(
-            self.server["csrf_headers"][0]["Cookie"],
-            "session=session-1",
-        )
+        self.assertNotIn("Cookie", self.server["csrf_headers"][0])
         self.assertNotIn("Cookie", self.server["put_calls"][0]["headers"])
+
+    def test_seeded_cookie_uses_api_hostname_scope(self):
+        calls = []
+
+        class CookieJar:
+            def set(self, name, value, **kwargs):
+                calls.append((name, value, kwargs))
+
+        class Session:
+            cookies = CookieJar()
+
+        self.assertTrue(
+            outlook_pool.seed_session_cookie(
+                Session(),
+                "session=session-1",
+                "http://outlook-email:5000",
+            )
+        )
+        self.assertEqual(
+            calls,
+            [("session", "session-1", {"domain": ".outlook-email", "path": "/"})],
+        )
 
     def test_already_inactive_is_idempotent_without_login(self):
         def inactive_get(url, **kwargs):
