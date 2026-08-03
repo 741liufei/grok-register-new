@@ -254,6 +254,10 @@ outlookemail-data/      可选 OutlookEmail 数据
 compose.yaml            Docker Compose 配置
 ```
 
+## 友情链接
+
+- [Linux.do 社区](https://linux.do)
+
 ## License
 
 [MIT](LICENSE)
