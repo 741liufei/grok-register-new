@@ -10,6 +10,7 @@ mkdir -p "$DATA_DIR" "$LOG_DIR" "$DATA_DIR/accounts" "$DATA_DIR/cpa_auth" "$DATA
 if [[ ! -e "$CONFIG_FILE" ]]; then
   python - "$CONFIG_FILE" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,9 @@ config = json.loads(source.read_text(encoding="utf-8"))
 config["browser_headless"] = False
 config["cpa_auth_dir"] = "data/cpa_auth"
 config["grok2api_auth_dir"] = "data/grok2api_auth"
+config["outlookemail_api_base"] = os.environ.get(
+    "GROK_OUTLOOKEMAIL_API_BASE", "http://outlook-email:5000"
+).strip()
 target.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
   echo "[docker] 已创建容器默认配置: $CONFIG_FILE"

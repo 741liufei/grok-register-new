@@ -9,6 +9,7 @@ front/node_modules
 front/dist
 data
 logs
+outlookemail-data
 config.json
 web_auth.json
 .next_action_id.cache

@@ -450,7 +450,7 @@ export function SettingsPage() {
             <ConfigField {...fieldState}
               label="API Base"
               field="outlookemail_api_base"
-              helper="OutlookEmail 邮箱池服务地址，例如 http://host:5000"
+              helper="Compose 可选服务使用 http://outlook-email:5000；外部服务填写其实际地址"
             />
             <ConfigField {...fieldState}
               label="API Key"

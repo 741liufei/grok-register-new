@@ -55,6 +55,31 @@ curl http://127.0.0.1:8787/api/health
 
 完整说明见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
+### 可选 OutlookEmail 邮箱池
+
+Compose 已集成 [`ghcr.io/assast/outlookemail:latest`](https://github.com/assast/outlookEmail)，默认不随主服务启动。需要选择 OutlookEmail 邮箱、导入账号或读取邮件时，在 `.env` 修改登录密码和 `SECRET_KEY`，然后启动可选 profile：
+
+```bash
+docker compose --profile outlookemail up -d
+```
+
+访问地址：
+
+```text
+Grok Register: http://服务器IP:8787
+OutlookEmail:  http://服务器IP:5000
+```
+
+`5000` 默认映射到宿主机所有网卡。主容器内的 API Base 使用：
+
+```text
+http://outlook-email:5000
+```
+
+Docker 首次生成 `data/config.json` 时会预填该内部地址；已有配置可在“系统设置 → Outlook 邮箱池”中填写。
+
+OutlookEmail 数据保存在 `outlookemail-data/`，并已被 Git 和 Docker 构建上下文忽略。完整配置见 [DEPLOYMENT.md](DEPLOYMENT.md#可选-outlookemail-邮箱池)。
+
 ## 配置文件
 
 ### 本机运行
@@ -154,6 +179,7 @@ data/
 └── grok2api_auth/                # Grok2API JSON
 
 logs/                             # 运行日志
+outlookemail-data/                # 可选 OutlookEmail 数据
 ```
 
 `data/`、`logs/` 和本地 `config.json` 已被 Git 忽略。
@@ -224,6 +250,7 @@ docs/images/            Web 界面截图
 .github/workflows/      GitHub Actions
 data/                   运行数据
 logs/                   运行日志
+outlookemail-data/      可选 OutlookEmail 数据
 compose.yaml            Docker Compose 配置
 ```
 
