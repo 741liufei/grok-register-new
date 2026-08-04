@@ -119,7 +119,11 @@ Docker 配置中的授权目录建议保持：
 ```json
 {
   "cpa_auth_dir": "data/cpa_auth",
-  "grok2api_auth_dir": "data/grok2api_auth"
+  "grok2api_auth_dir": "data/grok2api_auth",
+  "grok2api_remote_url": "https://grok2api.example.com",
+  "grok2api_remote_username": "admin",
+  "grok2api_remote_password": "change-me",
+  "grok2api_auto_import": true
 }
 ```
 
@@ -165,6 +169,10 @@ Windows 启动：
 | `cpa_remote_url` | CPA Management API 地址 |
 | `cpa_management_key` | CPA 管理密钥 |
 | `grok2api_auth_dir` | Grok2API JSON 保存目录 |
+| `grok2api_remote_url` | 远程 Grok2API 站点根地址 |
+| `grok2api_remote_username` | 远程 Grok2API 管理员账号 |
+| `grok2api_remote_password` | 远程 Grok2API 管理员密码 |
+| `grok2api_auto_import` | JSON 生成后自动登录并导入远程 Grok2API |
 
 配置模板见 [`config.example.json`](config.example.json)。
 

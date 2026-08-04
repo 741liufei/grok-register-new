@@ -10,6 +10,7 @@ import {
   Loader2,
   LogIn,
   Mail,
+  UploadCloud,
   MoreHorizontal,
   Power,
   RefreshCw,
@@ -47,6 +48,17 @@ function cpaVariant(status: string) {
   if (status === "failed" || status === "rejected") return "destructive" as const;
   if (status === "disabled") return "secondary" as const;
   return "warning" as const;
+}
+
+function remoteImportLabel(status: string) {
+  const labels: Record<string, string> = {
+    success: "已导入",
+    partial: "已导入/同步失败",
+    failed: "导入失败",
+    ready: "待导入",
+    not_configured: "未配置",
+  };
+  return labels[status] || status || "未配置";
 }
 
 function emailDisableVariant(status: string) {
@@ -137,6 +149,12 @@ function AccountDetails({
     ["Auth 路径", detail.auth_path],
     ["CPA JSON 路径", detail.cpa_auth_path],
     ["Grok2API JSON 路径", detail.grok2api_auth_path],
+    ["CPA 远程入库", remoteImportLabel(detail.cpa_remote_status)],
+    ["CPA 远程入库时间", detail.cpa_remote_imported_at],
+    ["CPA 远程错误", detail.cpa_remote_error],
+    ["Grok2API 远程入库", remoteImportLabel(detail.grok2api_remote_status)],
+    ["Grok2API 远程入库时间", detail.grok2api_remote_imported_at],
+    ["Grok2API 远程错误", detail.grok2api_remote_error],
     ["Auth 信息", detail.auth_info],
     ["邮箱池账号 ID", detail.email_account_id],
     ["邮箱停用状态", emailDisableLabel(detail.email_disable_status)],
@@ -156,6 +174,12 @@ function AccountDetails({
         <div className="mt-2 flex flex-wrap gap-2">
           <Badge variant={statusVariant(detail.status)}>{detail.status || "unknown"}</Badge>
           <Badge variant={cpaVariant(detail.cpa_status)}>CPA {detail.cpa_status || "-"}</Badge>
+          <Badge variant={cpaVariant(detail.cpa_remote_status)}>
+            CPA {remoteImportLabel(detail.cpa_remote_status)}
+          </Badge>
+          <Badge variant={cpaVariant(detail.grok2api_remote_status)}>
+            Grok2API {remoteImportLabel(detail.grok2api_remote_status)}
+          </Badge>
           <Badge variant={emailDisableVariant(detail.email_disable_status)}>
             邮箱 {emailDisableLabel(detail.email_disable_status)}
           </Badge>
@@ -290,6 +314,7 @@ export function AccountsPage() {
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
   const [reloginPolling, setReloginPolling] = useState(true);
   const [reloginFailure, setReloginFailure] = useState<{ email: string; error: string } | null>(null);
+  const [grok2apiImportingId, setGrok2apiImportingId] = useState<number | null>(null);
   const [moreMenu, setMoreMenu] = useState<{
     item: AccountRecord;
     top: number;
@@ -476,10 +501,32 @@ export function AccountsPage() {
     }
   };
 
+  const onImportGrok2API = async (item: AccountRecord) => {
+    setGrok2apiImportingId(item.id);
+    try {
+      const response = await api.importAccountToGrok2API(item.id);
+      setItems((previous) => previous.map((value) => value.id === item.id ? response.item : value));
+      if (detail?.id === item.id) setDetail(response.item);
+      const result = response.result || {};
+      const syncFailed = result.syncFailed || 0;
+      showToast(
+        syncFailed
+          ? `Grok2API 已入库，但远程同步失败 ${syncFailed} 个`
+          : `Grok2API 导入完成：新增 ${result.created || 0}，更新 ${result.updated || 0}`,
+        syncFailed ? "error" : "success"
+      );
+    } catch (err: any) {
+      showToast(err.message || "Grok2API 导入失败", "error");
+      await load();
+    } finally {
+      setGrok2apiImportingId(null);
+    }
+  };
+
   const openMoreMenu = (item: AccountRecord, button: HTMLButtonElement) => {
     const rect = button.getBoundingClientRect();
     const menuWidth = 224;
-    const menuHeight = 172;
+    const menuHeight = item.grok2api_remote_configured ? 220 : 172;
     const left = Math.min(Math.max(rect.right - menuWidth, 8), window.innerWidth - menuWidth - 8);
     const top = rect.bottom + menuHeight > window.innerHeight
       ? Math.max(8, rect.top - menuHeight - 6)
@@ -503,6 +550,7 @@ export function AccountsPage() {
 
   const MoreMenuContent = ({ item }: { item: AccountRecord }) => {
     const currentRelogin = !!relogin?.running && relogin.account_id === item.id;
+    const importing = grok2apiImportingId === item.id;
     const exportEntry = (kind: "cpa" | "grok2api") => {
       const available = kind === "cpa" ? item.cpa_auth_available : item.grok2api_auth_available;
       const label = kind === "cpa" ? "下载 CPA JSON" : "下载 Grok2API JSON";
@@ -537,6 +585,26 @@ export function AccountsPage() {
       <div role="menu" className="space-y-1">
         {exportEntry("cpa")}
         {exportEntry("grok2api")}
+        {item.grok2api_remote_configured ? (
+          <button
+            type="button"
+            role="menuitem"
+            className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={importing || !item.grok2api_auth_available}
+            title={!item.grok2api_auth_available ? "Grok2API JSON 文件不存在" : undefined}
+            onClick={() => {
+              setMoreMenu(null);
+              void onImportGrok2API(item);
+            }}
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <UploadCloud className="h-4 w-4" aria-hidden="true" />
+            )}
+            {importing ? "正在导入 Grok2API" : "导入到 Grok2API"}
+          </button>
+        ) : null}
         <div className="my-1 border-t" />
         <button
           type="button"
@@ -688,6 +756,12 @@ export function AccountsPage() {
                           <div className="mt-2 flex flex-wrap gap-2">
                             <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
                             <Badge variant={cpaVariant(item.cpa_status)}>CPA {item.cpa_status || "-"}</Badge>
+                            <Badge variant={cpaVariant(item.cpa_remote_status)}>
+                              CPA {remoteImportLabel(item.cpa_remote_status)}
+                            </Badge>
+                            <Badge variant={cpaVariant(item.grok2api_remote_status)}>
+                              Grok2API {remoteImportLabel(item.grok2api_remote_status)}
+                            </Badge>
                             <Badge variant={emailDisableVariant(item.email_disable_status)}>
                               <Power className="mr-1 h-3 w-3" aria-hidden="true" />
                               {emailDisableLabel(item.email_disable_status)}
@@ -777,6 +851,12 @@ export function AccountsPage() {
                             <div className="flex flex-col items-start gap-1.5">
                               <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
                               <Badge variant={cpaVariant(item.cpa_status)}>CPA {item.cpa_status || "-"}</Badge>
+                              <Badge variant={cpaVariant(item.cpa_remote_status)}>
+                                CPA {remoteImportLabel(item.cpa_remote_status)}
+                              </Badge>
+                              <Badge variant={cpaVariant(item.grok2api_remote_status)}>
+                                Grok2API {remoteImportLabel(item.grok2api_remote_status)}
+                              </Badge>
                             </div>
                           </td>
                           <td className="px-3 py-3">

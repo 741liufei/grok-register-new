@@ -78,6 +78,10 @@ CONFIG_PUBLIC_KEYS = (
     "cpa_remote_url",
     "cpa_management_key",
     "grok2api_auth_dir",
+    "grok2api_remote_url",
+    "grok2api_remote_username",
+    "grok2api_remote_password",
+    "grok2api_auto_import",
     "mailnest_api_key",
     "mailnest_project_code",
     "yyds_api_key",
@@ -95,6 +99,7 @@ SENSITIVE_HINT_KEYS = {
     "outlookemail_web_password",
     "outlookemail_session_cookie",
     "cpa_management_key",
+    "grok2api_remote_password",
     "mailnest_api_key",
     "yyds_api_key",
     "yyds_jwt",
@@ -279,6 +284,7 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "browser_headless",
             "close_browser_on_stop",
             "cpa_auto_add",
+            "grok2api_auto_import",
             "outlookemail_disable_after_cpa_success",
         ):
             value = bool(value)
@@ -319,6 +325,7 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
         elif key in (
             "proxy",
             "cpa_remote_url",
+            "grok2api_remote_url",
             "outlookemail_api_base",
             "duckmail_api_base",
             "cloudflare_api_base",
@@ -346,6 +353,9 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
     item["cpa_enabled"] = bool(item.get("cpa_enabled"))
     item["sso_saved"] = bool(item.get("sso_saved"))
     raw_config = _gr().config
+    from backend.integrations.grok2api_client import remote_configured
+
+    item["grok2api_remote_configured"] = remote_configured(raw_config)
     for kind in ("cpa", "grok2api"):
         try:
             _find_account_auth_file(item, raw_config, kind)
@@ -710,6 +720,57 @@ def create_app() -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"ok": True, "relogin": status}
+
+    @app.post("/api/accounts/{account_id}/grok2api/import")
+    def api_account_grok2api_import(account_id: int) -> Dict[str, Any]:
+        """把已生成的 grok_build JSON 导入配置的远程 Grok2API。"""
+        from backend.integrations.grok2api_client import (
+            Grok2APIImportError,
+            import_with_credentials,
+            remote_configured,
+        )
+
+        gr = _gr()
+        gr.load_config()
+        store = gr.get_registration_repository()
+        rows = store.get_results_by_ids([account_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        if not remote_configured(gr.config):
+            raise HTTPException(
+                status_code=400,
+                detail="请先在系统设置完整配置 Grok2API API 地址、管理员账号和密码",
+            )
+        try:
+            path = _find_account_auth_file(rows[0], gr.config, "grok2api")
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            result = import_with_credentials(gr.config, path)
+        except Grok2APIImportError as exc:
+            store.update_remote_import_status(
+                account_id,
+                "grok2api",
+                status="failed",
+                error=str(exc),
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        import_status = "partial" if int(result.get("syncFailed", 0) or 0) > 0 else "success"
+        import_error = (
+            f"远程同步失败 {result.get('syncFailed', 0)} 个"
+            if import_status == "partial"
+            else ""
+        )
+        store.update_remote_import_status(
+            account_id,
+            "grok2api",
+            status=import_status,
+            error=import_error,
+        )
+        refreshed = store.get_results_by_ids([account_id])[0]
+        return {"ok": True, "result": result, "item": _serialize_record(refreshed)}
 
     @app.get("/api/accounts/{account_id}/failure-screenshot")
     def api_account_failure_screenshot(account_id: int) -> FileResponse:

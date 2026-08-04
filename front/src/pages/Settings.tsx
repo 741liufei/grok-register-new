@@ -375,39 +375,76 @@ export function SettingsPage() {
         ) : null}
 
         {activeSection === "cpa" ? (
-        <Card>
-          <CardHeader className="flex-row items-start gap-3">
-            <SectionIcon><ShieldCheck className="h-5 w-5" aria-hidden="true" /></SectionIcon>
-            <div>
-              <CardTitle>CPA / Auth 入库</CardTitle>
-              <CardDescription>配置授权转换方式、本地目录与远程管理端。</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <ToggleRow
-                title="注册后自动 SSO → auth"
-                description="所有邮箱服务商都必须 CPA 状态为 success 才计注册成功，请保持开启"
-                checked={!!config.cpa_auto_add}
-                onCheckedChange={(value) => setField("cpa_auto_add", value)}
-              />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="cpa_token_mode">授权转换方式</Label>
-              <Select
-                id="cpa_token_mode"
-                value={config.cpa_token_mode || "device_protocol"}
-                onChange={(event) => setField("cpa_token_mode", event.target.value)}
-              >
-                {TOKEN_MODES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </Select>
-            </div>
-            <ConfigField {...fieldState} label="CPA 本地授权目录" field="cpa_auth_dir" />
-            <ConfigField {...fieldState} label="Grok2API 授权目录" field="grok2api_auth_dir" />
-            <ConfigField {...fieldState} label="远程 CPA 地址" field="cpa_remote_url" placeholder="http://host:8317" />
-            <ConfigField {...fieldState} label="远程管理密钥" field="cpa_management_key" type="password" />
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="flex-row items-start gap-3">
+              <SectionIcon><ShieldCheck className="h-5 w-5" aria-hidden="true" /></SectionIcon>
+              <div>
+                <CardTitle>授权转换</CardTitle>
+                <CardDescription>注册完成后将 SSO 换为 CPA 与 Grok2API 所需凭据。</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <ToggleRow
+                  title="注册后自动 SSO → auth"
+                  description="所有邮箱服务商都必须 CPA 状态为 success 才计注册成功，请保持开启"
+                  checked={!!config.cpa_auto_add}
+                  onCheckedChange={(value) => setField("cpa_auto_add", value)}
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="cpa_token_mode">授权转换方式</Label>
+                <Select
+                  id="cpa_token_mode"
+                  value={config.cpa_token_mode || "device_protocol"}
+                  onChange={(event) => setField("cpa_token_mode", event.target.value)}
+                >
+                  {TOKEN_MODES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>CPA 目标</CardTitle>
+                <CardDescription>保存本地 CPA JSON，也可上传到远程 Management API。</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <ConfigField {...fieldState} label="本地授权目录" field="cpa_auth_dir" />
+                <ConfigField {...fieldState} label="远程 CPA 地址" field="cpa_remote_url" placeholder="http://host:8317" />
+                <ConfigField {...fieldState} label="远程管理密钥" field="cpa_management_key" type="password" />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Grok2API 目标</CardTitle>
+                <CardDescription>保存 grok_build JSON，并通过管理员账号登录远程服务导入。</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <ConfigField {...fieldState} label="本地授权目录" field="grok2api_auth_dir" />
+                <ConfigField
+                  {...fieldState}
+                  label="远程 API 地址"
+                  field="grok2api_remote_url"
+                  placeholder="https://api.example.com"
+                  helper="填写站点根地址，不要附加 /api/admin/v1"
+                />
+                <ConfigField {...fieldState} label="管理员账号" field="grok2api_remote_username" />
+                <ConfigField {...fieldState} label="管理员密码" field="grok2api_remote_password" type="password" />
+                <ToggleRow
+                  title="转换成功后自动导入"
+                  description="生成 Grok2API JSON 后立即登录远程管理端并导入；导入结果单独记录"
+                  checked={!!config.grok2api_auto_import}
+                  onCheckedChange={(value) => setField("grok2api_auto_import", value)}
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
         ) : null}
 
         {activeSection === "providers" ? (

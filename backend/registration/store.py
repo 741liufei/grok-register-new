@@ -33,6 +33,12 @@ RESULT_COLUMNS = (
     "auth_path",
     "cpa_auth_path",
     "grok2api_auth_path",
+    "cpa_remote_status",
+    "cpa_remote_imported_at",
+    "cpa_remote_error",
+    "grok2api_remote_status",
+    "grok2api_remote_imported_at",
+    "grok2api_remote_error",
     "email_account_id",
     "email_disable_status",
     "email_disabled_at",
@@ -89,6 +95,12 @@ class RegistrationRepository:
                     auth_path TEXT NOT NULL DEFAULT '',
                     cpa_auth_path TEXT NOT NULL DEFAULT '',
                     grok2api_auth_path TEXT NOT NULL DEFAULT '',
+                    cpa_remote_status TEXT NOT NULL DEFAULT 'not_configured',
+                    cpa_remote_imported_at TEXT NOT NULL DEFAULT '',
+                    cpa_remote_error TEXT NOT NULL DEFAULT '',
+                    grok2api_remote_status TEXT NOT NULL DEFAULT 'not_configured',
+                    grok2api_remote_imported_at TEXT NOT NULL DEFAULT '',
+                    grok2api_remote_error TEXT NOT NULL DEFAULT '',
                     email_account_id TEXT NOT NULL DEFAULT '',
                     email_disable_status TEXT NOT NULL DEFAULT 'not_attempted',
                     email_disabled_at TEXT NOT NULL DEFAULT '',
@@ -124,6 +136,12 @@ class RegistrationRepository:
                 "email_disabled_at": "TEXT NOT NULL DEFAULT ''",
                 "email_disable_error": "TEXT NOT NULL DEFAULT ''",
                 "screenshot_path": "TEXT NOT NULL DEFAULT ''",
+                "cpa_remote_status": "TEXT NOT NULL DEFAULT 'not_configured'",
+                "cpa_remote_imported_at": "TEXT NOT NULL DEFAULT ''",
+                "cpa_remote_error": "TEXT NOT NULL DEFAULT ''",
+                "grok2api_remote_status": "TEXT NOT NULL DEFAULT 'not_configured'",
+                "grok2api_remote_imported_at": "TEXT NOT NULL DEFAULT ''",
+                "grok2api_remote_error": "TEXT NOT NULL DEFAULT ''",
             }
             for column, definition in migrations.items():
                 if column not in existing_columns:
@@ -140,11 +158,19 @@ class RegistrationRepository:
             )
             conn.execute(
                 """
+                UPDATE registration_results
+                SET cpa_remote_status = 'success'
+                WHERE cpa_remote_status = 'not_configured'
+                  AND auth_info LIKE '%CPA 远程:%'
+                """
+            )
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_registration_results_email_disable_status
                 ON registration_results(email_disable_status)
                 """
             )
-            conn.execute("PRAGMA user_version = 3")
+            conn.execute("PRAGMA user_version = 4")
 
     def add_result(self, record: Dict[str, Any]) -> int:
         now = self.now_text()
@@ -175,6 +201,16 @@ class RegistrationRepository:
             "auth_path": str(record.get("auth_path") or ""),
             "cpa_auth_path": str(record.get("cpa_auth_path") or ""),
             "grok2api_auth_path": str(record.get("grok2api_auth_path") or ""),
+            "cpa_remote_status": str(record.get("cpa_remote_status") or "not_configured"),
+            "cpa_remote_imported_at": str(record.get("cpa_remote_imported_at") or ""),
+            "cpa_remote_error": str(record.get("cpa_remote_error") or ""),
+            "grok2api_remote_status": str(
+                record.get("grok2api_remote_status") or "not_configured"
+            ),
+            "grok2api_remote_imported_at": str(
+                record.get("grok2api_remote_imported_at") or ""
+            ),
+            "grok2api_remote_error": str(record.get("grok2api_remote_error") or ""),
             "email_account_id": str(record.get("email_account_id") or ""),
             "email_disable_status": str(
                 record.get("email_disable_status") or "not_attempted"
@@ -346,6 +382,22 @@ class RegistrationRepository:
                         "auth_path": str(detail.get("auth_path") or ""),
                         "cpa_auth_path": str(detail.get("cpa_auth_path") or ""),
                         "grok2api_auth_path": str(detail.get("grok2api_auth_path") or ""),
+                        "cpa_remote_status": str(
+                            detail.get("cpa_remote_status") or "not_configured"
+                        ),
+                        "cpa_remote_imported_at": str(
+                            detail.get("cpa_remote_imported_at") or ""
+                        ),
+                        "cpa_remote_error": str(detail.get("cpa_remote_error") or ""),
+                        "grok2api_remote_status": str(
+                            detail.get("grok2api_remote_status") or "not_configured"
+                        ),
+                        "grok2api_remote_imported_at": str(
+                            detail.get("grok2api_remote_imported_at") or ""
+                        ),
+                        "grok2api_remote_error": str(
+                            detail.get("grok2api_remote_error") or ""
+                        ),
                     }
                 )
                 assignments.extend(
@@ -358,6 +410,12 @@ class RegistrationRepository:
                         "auth_path = :auth_path",
                         "cpa_auth_path = :cpa_auth_path",
                         "grok2api_auth_path = :grok2api_auth_path",
+                        "cpa_remote_status = :cpa_remote_status",
+                        "cpa_remote_imported_at = :cpa_remote_imported_at",
+                        "cpa_remote_error = :cpa_remote_error",
+                        "grok2api_remote_status = :grok2api_remote_status",
+                        "grok2api_remote_imported_at = :grok2api_remote_imported_at",
+                        "grok2api_remote_error = :grok2api_remote_error",
                     ]
                 )
                 if relogin_status == "success" and not screenshot_path:
@@ -365,6 +423,41 @@ class RegistrationRepository:
             cursor = conn.execute(
                 f"UPDATE registration_results SET {', '.join(assignments)} WHERE id = :id",
                 values,
+            )
+            return bool(cursor.rowcount)
+
+    def update_remote_import_status(
+        self,
+        account_id: int,
+        kind: str,
+        *,
+        status: str,
+        error: str = "",
+        imported_at: str = "",
+    ) -> bool:
+        """更新 CPA 或 Grok2API 的远程入库状态。"""
+        normalized_kind = str(kind or "").strip().lower()
+        if normalized_kind not in {"cpa", "grok2api"}:
+            raise ValueError("kind 必须是 cpa 或 grok2api")
+        try:
+            normalized_id = int(account_id)
+        except (TypeError, ValueError):
+            return False
+        if normalized_id <= 0:
+            return False
+        normalized_status = str(status or "failed").strip().lower()
+        timestamp = str(imported_at or "")
+        if normalized_status in {"success", "partial"} and not timestamp:
+            timestamp = self.now_text()
+        prefix = f"{normalized_kind}_remote"
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE registration_results
+                SET {prefix}_status = ?, {prefix}_imported_at = ?, {prefix}_error = ?
+                WHERE id = ?
+                """,
+                (normalized_status, timestamp, str(error or ""), normalized_id),
             )
             return bool(cursor.rowcount)
 

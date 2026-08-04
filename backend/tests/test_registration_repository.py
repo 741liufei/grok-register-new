@@ -55,7 +55,7 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
             with sqlite3.connect(path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(registration_results)")}
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
-            self.assertEqual(version, 3)
+            self.assertEqual(version, 4)
             self.assertTrue(
                 {
                     "email_account_id",
@@ -65,6 +65,12 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
                     "cpa_auth_path",
                     "grok2api_auth_path",
                     "screenshot_path",
+                    "cpa_remote_status",
+                    "cpa_remote_imported_at",
+                    "cpa_remote_error",
+                    "grok2api_remote_status",
+                    "grok2api_remote_imported_at",
+                    "grok2api_remote_error",
                 }.issubset(columns)
             )
             self.assertEqual(store.list_results()[0]["email_disable_status"], "not_applicable")
@@ -101,6 +107,16 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
             self.assertEqual(stats["email_disable_failed"], 1)
             disabled = next(row for row in store.list_results() if row["email"] == "disabled@outlook.com")
             self.assertEqual(disabled["screenshot_path"], "/tmp/failure.png")
+            self.assertEqual(disabled["grok2api_remote_status"], "not_configured")
+
+            self.assertTrue(
+                store.update_remote_import_status(
+                    disabled["id"], "grok2api", status="success"
+                )
+            )
+            refreshed = store.get_results_by_ids([disabled["id"]])[0]
+            self.assertEqual(refreshed["grok2api_remote_status"], "success")
+            self.assertTrue(refreshed["grok2api_remote_imported_at"])
 
 
 if __name__ == "__main__":

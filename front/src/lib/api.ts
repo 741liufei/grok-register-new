@@ -31,6 +31,13 @@ export type AccountRecord = {
   grok2api_auth_path: string;
   cpa_auth_available: boolean;
   grok2api_auth_available: boolean;
+  cpa_remote_status: string;
+  cpa_remote_imported_at: string;
+  cpa_remote_error: string;
+  grok2api_remote_status: string;
+  grok2api_remote_imported_at: string;
+  grok2api_remote_error: string;
+  grok2api_remote_configured: boolean;
   email_account_id: string;
   email_disable_status: string;
   email_disabled_at: string;
@@ -172,6 +179,12 @@ export const api = {
     }),
   reloginStatus: () =>
     request<{ ok: boolean; relogin: ReloginStatus }>("/api/accounts/relogin/status"),
+  importAccountToGrok2API: (id: number) =>
+    request<{
+      ok: boolean;
+      result: { created?: number; updated?: number; synced?: number; syncFailed?: number };
+      item: AccountRecord;
+    }>(`/api/accounts/${id}/grok2api/import`, { method: "POST" }),
   deleteAccounts: (ids: number[], deleteFiles = true) =>
     request<{ ok: boolean; deleted: number; deleted_files: number; side_lines: number; file_errors: string[] }>(
       "/api/accounts/delete",
