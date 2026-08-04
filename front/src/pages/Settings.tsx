@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   Cloud,
+  Copy,
+  Eye,
+  EyeOff,
+  FileJson,
   Mail,
   RefreshCw,
   Save,
   Settings2,
   ShieldCheck,
+  X,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type ConfigFileSnapshot } from "@/lib/api";
+import { copyText } from "@/lib/utils";
 import {
   Button,
   Card,
@@ -158,6 +164,11 @@ export function SettingsPage() {
   const [activeSection, setActiveSection] = useState("basic");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [configFileOpen, setConfigFileOpen] = useState(false);
+  const [configFileLoading, setConfigFileLoading] = useState(false);
+  const [configFile, setConfigFile] = useState<ConfigFileSnapshot | null>(null);
+  const [configFileError, setConfigFileError] = useState("");
+  const [showConfigSecrets, setShowConfigSecrets] = useState(true);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
   });
@@ -183,6 +194,15 @@ export function SettingsPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!configFileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfigFileOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [configFileOpen]);
+
   const setField = (key: string, value: any) => {
     setConfig((previous) => ({ ...previous, [key]: value }));
   };
@@ -204,6 +224,45 @@ export function SettingsPage() {
     }
   };
 
+  const loadConfigFile = async () => {
+    setConfigFileLoading(true);
+    setConfigFileError("");
+    try {
+      const data = await api.getConfigFile();
+      setConfigFile(data.file);
+    } catch (err: any) {
+      setConfigFileError(err.message || "读取 config.json 失败");
+    } finally {
+      setConfigFileLoading(false);
+    }
+  };
+
+  const openConfigFile = () => {
+    setConfigFileOpen(true);
+    setShowConfigSecrets(true);
+    void loadConfigFile();
+  };
+
+  const displayedConfigContent = (() => {
+    const content = String(configFile?.content || "");
+    if (showConfigSecrets || !content) return content;
+    try {
+      const parsed = JSON.parse(content);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return content;
+      for (const key of configFile?.sensitive_keys || []) {
+        if (key in parsed && parsed[key] !== "" && parsed[key] !== null) parsed[key] = "********";
+      }
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return content;
+    }
+  })();
+
+  const copyConfigValue = async (value: string, label: string) => {
+    const copied = await copyText(value);
+    showToast(copied ? `已复制${label}` : `${label}复制失败`, copied ? "success" : "error");
+  };
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <PageHeader
@@ -211,6 +270,10 @@ export function SettingsPage() {
         description="按功能区分注册、入库与邮箱配置；修改只在保存后生效。"
         actions={
           <>
+            <Button className="basis-full sm:basis-auto" variant="outline" onClick={openConfigFile}>
+              <FileJson className="h-4 w-4" aria-hidden="true" />
+              查看 config.json
+            </Button>
             <Button variant="outline" onClick={load} disabled={loading || saving}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
               重新加载
@@ -513,6 +576,103 @@ export function SettingsPage() {
           {saving ? "保存中…" : "保存全部配置"}
         </Button>
       </div>
+
+      {configFileOpen ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-end bg-slate-950/50 sm:items-center sm:justify-center sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setConfigFileOpen(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="config-file-title"
+            className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-card shadow-2xl sm:max-w-5xl sm:rounded-3xl"
+          >
+            <div className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-slate-300 sm:hidden" />
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <h2 id="config-file-title" className="flex items-center gap-2 font-semibold text-foreground">
+                  <FileJson className="h-4 w-4 text-primary" aria-hidden="true" />
+                  config.json
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {configFile?.exists ? "磁盘文件" : "运行时配置预览"}
+                </p>
+              </div>
+              <Button size="icon" variant="ghost" onClick={() => setConfigFileOpen(false)} aria-label="关闭 config.json">
+                <X className="h-5 w-5" aria-hidden="true" />
+              </Button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              {configFileLoading && !configFile ? (
+                <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  读取中…
+                </div>
+              ) : configFileError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{configFileError}</div>
+              ) : configFile ? (
+                <div className="space-y-4">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
+                    <div className="min-w-0 rounded-xl border bg-muted/35 p-3">
+                      <div className="text-xs font-medium text-muted-foreground">实际路径</div>
+                      <div className="mt-1 break-all font-mono text-xs leading-5 text-foreground">{configFile.path}</div>
+                    </div>
+                    <Button variant="outline" onClick={() => copyConfigValue(configFile.path, "配置路径")}>
+                      <Copy className="h-4 w-4" aria-hidden="true" />
+                      复制路径
+                    </Button>
+                    <Button variant="outline" onClick={loadConfigFile} disabled={configFileLoading}>
+                      <RefreshCw className={`h-4 w-4 ${configFileLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+                      刷新
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className={`rounded-full border px-2.5 py-1 ${configFile.exists ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-muted"}`}>
+                      {configFile.exists ? "文件存在" : "文件未创建"}
+                    </span>
+                    <span>{configFile.size.toLocaleString()} bytes</span>
+                    {configFile.modified_at ? <span>{new Date(configFile.modified_at).toLocaleString()}</span> : null}
+                  </div>
+
+                  {configFile.parse_error ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      JSON 解析异常：{configFile.parse_error}
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-hidden rounded-xl border bg-slate-950 text-slate-100">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
+                      <span className="text-xs font-medium text-slate-300">JSON</span>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setShowConfigSecrets((value) => !value)}
+                        >
+                          {showConfigSecrets ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+                          {showConfigSecrets ? "隐藏敏感值" : "显示敏感值"}
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => copyConfigValue(displayedConfigContent, "JSON")}>
+                          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                          复制 JSON
+                        </Button>
+                      </div>
+                    </div>
+                    <pre className="max-h-[52dvh] overflow-auto whitespace-pre p-4 font-mono text-xs leading-5 sm:text-sm">
+                      {displayedConfigContent}
+                    </pre>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <Toast message={toast.message} tone={toast.tone} />
     </div>

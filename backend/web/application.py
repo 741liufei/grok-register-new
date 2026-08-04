@@ -14,6 +14,7 @@ import os
 import secrets
 import time
 import traceback
+import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -221,6 +222,47 @@ def _public_config(raw: Dict[str, Any]) -> Dict[str, Any]:
             out[key] = gr.DEFAULT_CONFIG.get(key)
     out["_sensitive_keys"] = sorted(SENSITIVE_HINT_KEYS)
     return out
+
+
+def _config_file_snapshot() -> Dict[str, Any]:
+    """读取磁盘上的实际 config.json，并返回适合管理端展示的元数据。"""
+    gr = _gr()
+    path = Path(gr.CONFIG_FILE).expanduser()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path.absolute()
+    result: Dict[str, Any] = {
+        "path": str(resolved),
+        "exists": resolved.is_file(),
+        "size": 0,
+        "modified_at": "",
+        "content": "{}",
+        "parse_error": "",
+        "sensitive_keys": sorted(SENSITIVE_HINT_KEYS),
+    }
+    if not resolved.is_file():
+        gr.load_config()
+        result["content"] = json.dumps(gr.config, ensure_ascii=False, indent=2)
+        return result
+    try:
+        stat = resolved.stat()
+        result["size"] = int(stat.st_size)
+        result["modified_at"] = datetime.datetime.fromtimestamp(
+            stat.st_mtime, tz=datetime.timezone.utc
+        ).isoformat().replace("+00:00", "Z")
+        if stat.st_size > 2 * 1024 * 1024:
+            raise ValueError("config.json 超过 2 MiB")
+        raw_text = resolved.read_text(encoding="utf-8")
+        parsed = json.loads(raw_text)
+        result["content"] = json.dumps(parsed, ensure_ascii=False, indent=2)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        result["parse_error"] = str(exc)
+        try:
+            result["content"] = resolved.read_text(encoding="utf-8")[: 2 * 1024 * 1024]
+        except (OSError, UnicodeError):
+            result["content"] = ""
+    return result
 
 
 def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -786,6 +828,10 @@ def create_app() -> FastAPI:
         gr = _gr()
         gr.load_config()
         return {"ok": True, "config": _public_config(gr.config)}
+
+    @app.get("/api/config/file")
+    def api_config_file_get() -> Dict[str, Any]:
+        return {"ok": True, "file": _config_file_snapshot()}
 
     @app.put("/api/config")
     @app.post("/api/config")

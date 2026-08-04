@@ -91,6 +91,16 @@ export type ReloginStatus = {
   finished_at?: number | null;
 };
 
+export type ConfigFileSnapshot = {
+  path: string;
+  exists: boolean;
+  size: number;
+  modified_at: string;
+  content: string;
+  parse_error: string;
+  sensitive_keys: string[];
+};
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -168,6 +178,7 @@ export const api = {
       { method: "POST", body: JSON.stringify({ ids, delete_files: deleteFiles }) }
     ),
   getConfig: () => request<{ ok: boolean; config: Record<string, any> }>("/api/config"),
+  getConfigFile: () => request<{ ok: boolean; file: ConfigFileSnapshot }>("/api/config/file"),
   saveConfig: (config: Record<string, any>) =>
     request<{ ok: boolean; config: Record<string, any>; changed: string[] }>("/api/config", {
       method: "PUT",
