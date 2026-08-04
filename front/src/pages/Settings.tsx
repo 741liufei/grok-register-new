@@ -231,7 +231,7 @@ export function SettingsPage() {
       const data = await api.getConfigFile();
       setConfigFile(data.file);
     } catch (err: any) {
-      setConfigFileError(err.message || "读取 config.json 失败");
+      setConfigFileError(err.message || "读取配置失败");
     } finally {
       setConfigFileLoading(false);
     }
@@ -272,7 +272,7 @@ export function SettingsPage() {
           <>
             <Button className="basis-full sm:basis-auto" variant="outline" onClick={openConfigFile}>
               <FileJson className="h-4 w-4" aria-hidden="true" />
-              查看 config.json
+              查看配置
             </Button>
             <Button variant="outline" onClick={load} disabled={loading || saving}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
@@ -595,13 +595,13 @@ export function SettingsPage() {
               <div className="min-w-0">
                 <h2 id="config-file-title" className="flex items-center gap-2 font-semibold text-foreground">
                   <FileJson className="h-4 w-4 text-primary" aria-hidden="true" />
-                  config.json
+                  配置详情
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {configFile?.exists ? "磁盘文件" : "运行时配置预览"}
                 </p>
               </div>
-              <Button size="icon" variant="ghost" onClick={() => setConfigFileOpen(false)} aria-label="关闭 config.json">
+              <Button size="icon" variant="ghost" onClick={() => setConfigFileOpen(false)} aria-label="关闭配置详情">
                 <X className="h-5 w-5" aria-hidden="true" />
               </Button>
             </header>
@@ -645,9 +645,9 @@ export function SettingsPage() {
                     </div>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-xl border bg-slate-950 text-slate-100">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
-                      <span className="text-xs font-medium text-slate-300">JSON</span>
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-slate-800">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/80 px-3 py-2">
+                      <span className="text-xs font-medium text-slate-600">JSON 配置内容</span>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           size="sm"
