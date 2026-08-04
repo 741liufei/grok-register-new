@@ -47,6 +47,9 @@ export type AccountRecord = {
   failure_reason: string;
   screenshot_path: string;
   screenshot_url: string;
+  exception_traceback: string;
+  exception_type: string;
+  has_exception_traceback: boolean;
   nsfw_status: string;
   started_at: string;
   finished_at: string;

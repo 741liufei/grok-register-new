@@ -18,6 +18,7 @@ import re
 import string
 import json
 import base64
+import traceback
 
 from playwright._impl._errors import TargetClosedError as PageDisconnectedError
 from curl_cffi import requests
@@ -84,9 +85,28 @@ CONFIG_FILE = os.path.abspath(
 ACCOUNTS_DIR = os.path.join(DATA_DIR, "accounts")
 RESULTS_DB_FILE = os.path.join(ACCOUNTS_DIR, "registration_results.sqlite3")
 MEMORY_CLEANUP_INTERVAL = 5
+TRACEBACK_MAX_CHARS = 60_000
+TRACEBACK_LOG_MAX_CHARS = 16_000
 
 _repository = None
 _repository_lock = threading.Lock()
+
+
+def current_exception_traceback(max_chars=TRACEBACK_MAX_CHARS):
+    """返回当前异常的标准堆栈；没有活动异常时返回空字符串。"""
+    text = traceback.format_exc().strip()
+    if not text or text == "NoneType: None":
+        return ""
+
+    limit = max(1_000, int(max_chars or TRACEBACK_MAX_CHARS))
+    if len(text) > limit:
+        tail_size = min(4_000, limit // 4)
+        text = (
+            text[: limit - tail_size]
+            + "\n... 异常堆栈过长，已截断 ...\n"
+            + text[-tail_size:]
+        )
+    return text
 
 
 def ensure_accounts_dir():
@@ -2120,6 +2140,8 @@ def run_registration(count):
     _token_mode_map = {"device_protocol": "协议 Device Flow", "device_browser": "浏览器 Device Flow", "auth_code": "Authorization Code"}
     _token_mode_label = _token_mode_map.get(str(config.get("cpa_token_mode", "device_protocol")), "协议 Device Flow")
     registration_log(f"[*] SSO→auth: {'开' if config.get('cpa_auto_add') else '关（账号将不计成功）'}" + (f"（{_token_mode_label}）" if config.get('cpa_auto_add') else ""))
+    traceback_log_lock = threading.Lock()
+    logged_traceback_signatures = set()
     # 启动前清理上次崩溃 / 强杀残留的临时 profile 目录
     try:
         _cleanup_stale_profiles(log_callback=registration_log)
@@ -2143,6 +2165,24 @@ def run_registration(count):
         return kind
 
     def _persist_result(*, started_at, worker_id=0, **kwargs):
+        trace_text = ""
+        if str(kwargs.get("status") or "").strip().lower() == "failure":
+            trace_text = current_exception_traceback()
+            if trace_text:
+                extra = dict(kwargs.get("extra") or {})
+                extra["exception_traceback"] = trace_text
+                extra["exception_type"] = trace_text.rstrip().splitlines()[-1]
+                kwargs["extra"] = extra
+                signature = hash(trace_text)
+                with traceback_log_lock:
+                    should_log_traceback = signature not in logged_traceback_signatures
+                    if should_log_traceback:
+                        logged_traceback_signatures.add(signature)
+                if should_log_traceback:
+                    registration_log(
+                        "[异常堆栈]\n"
+                        + current_exception_traceback(TRACEBACK_LOG_MAX_CHARS)
+                    )
         if (
             str(kwargs.get("status") or "").strip().lower() == "failure"
             and str(kwargs.get("failure_type") or "") != FAIL_CPA

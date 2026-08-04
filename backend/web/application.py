@@ -375,6 +375,10 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
             item["extra"] = {"raw": extra}
     else:
         item["extra"] = extra
+    extra_data = item["extra"] if isinstance(item["extra"], dict) else {}
+    item["exception_traceback"] = str(extra_data.get("exception_traceback") or "")
+    item["exception_type"] = str(extra_data.get("exception_type") or "")
+    item["has_exception_traceback"] = bool(item["exception_traceback"])
     return item
 
 

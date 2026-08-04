@@ -221,6 +221,8 @@ class RegistrationJobCoordinator:
                 with manager._lock:
                     manager._last_error = str(exc)
                 manager._append_log(f"[!] Web 任务异常: {exc}")
+                trace_text = gr.current_exception_traceback(gr.TRACEBACK_LOG_MAX_CHARS)
+                manager._append_log(f"[异常堆栈]\n{trace_text}")
             finally:
                 gr.registration_log = original_registration_log
                 gr.RegistrationStopController = original_controller_cls

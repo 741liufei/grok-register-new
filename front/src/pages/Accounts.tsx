@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Braces,
+  Bug,
   Camera,
   ChevronLeft,
   ChevronRight,
@@ -242,8 +243,6 @@ function AccountDetails({
     ["邮箱停用状态", emailDisableLabel(detail.email_disable_status)],
     ["邮箱停用时间", detail.email_disabled_at],
     ["邮箱停用错误", detail.email_disable_error],
-    ["失败类型", detail.failure_type],
-    ["失败原因", detail.failure_reason],
     ["失败截图路径", detail.screenshot_path],
     ["Batch", detail.batch_id],
     ["来源", detail.source],
@@ -284,6 +283,63 @@ function AccountDetails({
           </a>
           <div className="px-3 py-2 text-xs text-muted-foreground">点击截图可在新窗口查看原图</div>
         </div>
+      ) : null}
+
+      {detail.status === "failure" || detail.failure_reason || detail.exception_traceback ? (
+        <section className="overflow-hidden rounded-xl border border-red-200 bg-red-50/60">
+          <div className="flex items-center justify-between gap-3 border-b border-red-200 px-3 py-2.5">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-red-800">
+              <Bug className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>异常日志</span>
+            </div>
+            <span className="shrink-0 text-xs text-red-600">{detail.finished_at || detail.started_at || "时间未记录"}</span>
+          </div>
+          <div className="space-y-3 p-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[7rem_minmax(0,1fr)]">
+              <div className="text-xs font-medium text-red-700">异常类型</div>
+              <div className="break-words text-sm text-slate-800">
+                {detail.failure_type || detail.exception_type || "未分类异常"}
+              </div>
+              <div className="text-xs font-medium text-red-700">异常原因</div>
+              <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                {detail.failure_reason || detail.exception_type || "未记录异常原因"}
+              </div>
+            </div>
+
+            {detail.exception_traceback ? (
+              <details className="group overflow-hidden rounded-lg border border-red-200 bg-slate-50/90">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-medium text-red-800 [&::-webkit-details-marker]:hidden">
+                  <span className="min-w-0 truncate">完整异常堆栈</span>
+                  <span className="shrink-0 text-xs font-normal text-red-600 group-open:hidden">展开查看</span>
+                  <span className="hidden shrink-0 text-xs font-normal text-red-600 group-open:inline">收起</span>
+                </summary>
+                <div className="border-t border-red-200">
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5">
+                    <span className="min-w-0 truncate text-xs text-muted-foreground">
+                      {detail.exception_type || "Python 异常调用栈"}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 shrink-0"
+                      onClick={() => onCopy(detail.exception_traceback, "异常堆栈")}
+                    >
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                      复制
+                    </Button>
+                  </div>
+                  <pre className="max-h-[48dvh] overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-5 text-slate-700 sm:text-xs">
+                    {detail.exception_traceback}
+                  </pre>
+                </div>
+              </details>
+            ) : (
+              <div className="rounded-lg border border-dashed border-red-200 bg-white/60 px-3 py-2 text-xs leading-5 text-red-700">
+                该记录没有保存 Python 调用栈；新产生的注册异常会在这里显示完整堆栈。
+              </div>
+            )}
+          </div>
+        </section>
       ) : null}
 
       <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-3">

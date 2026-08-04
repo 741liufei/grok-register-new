@@ -44,6 +44,42 @@ class FailureScreenshotTests(unittest.TestCase):
         item = application._serialize_record({"id": 42, "screenshot_path": "/app/data/screenshots/failure.png"})
         self.assertEqual(item["screenshot_url"], "/api/accounts/42/failure-screenshot")
 
+    def test_current_exception_traceback_returns_active_exception_only(self):
+        self.assertEqual(engine.current_exception_traceback(), "")
+        try:
+            raise RuntimeError("fixture failure")
+        except RuntimeError:
+            result = engine.current_exception_traceback()
+        self.assertIn("Traceback (most recent call last)", result)
+        self.assertIn("RuntimeError: fixture failure", result)
+
+    def test_current_exception_traceback_truncates_and_keeps_exception_type(self):
+        try:
+            raise RuntimeError("x" * 4_000)
+        except RuntimeError:
+            result = engine.current_exception_traceback(1_000)
+        self.assertIn("异常堆栈过长，已截断", result)
+        self.assertTrue(result.endswith("x" * 100))
+
+    def test_current_exception_traceback_preserves_original_exception_message(self):
+        message = "Authorization: Bearer fixture-token password=fixture-password"
+        try:
+            raise RuntimeError(message)
+        except RuntimeError:
+            result = engine.current_exception_traceback()
+        self.assertIn(message, result)
+
+    def test_serialized_record_exposes_exception_traceback(self):
+        item = application._serialize_record(
+            {
+                "id": 43,
+                "extra_json": '{"exception_traceback": "Traceback fixture", "exception_type": "RuntimeError: fixture"}',
+            }
+        )
+        self.assertEqual(item["exception_traceback"], "Traceback fixture")
+        self.assertEqual(item["exception_type"], "RuntimeError: fixture")
+        self.assertTrue(item["has_exception_traceback"])
+
     def test_screenshot_reader_restricts_files_to_failure_directory(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(application, "DATA_DIR", Path(tmp)):
             root = Path(tmp) / "screenshots" / "registration-failures"
