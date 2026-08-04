@@ -694,6 +694,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "total": total,
             "count": len(rows),
+            "has_more": offset + len(rows) < total,
             "offset": offset,
             "limit": limit,
             "items": [_serialize_record(row) for row in rows],

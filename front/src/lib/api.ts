@@ -165,8 +165,9 @@ export const api = {
     return request<{
       ok: boolean;
       items: AccountRecord[];
-      total: number;
+      total: number | null;
       count: number;
+      has_more?: boolean;
       offset: number;
       limit: number;
     }>(

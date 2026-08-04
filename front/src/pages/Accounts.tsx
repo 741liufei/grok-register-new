@@ -395,6 +395,7 @@ export function AccountsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
   const [reloginPolling, setReloginPolling] = useState(true);
   const [reloginFailure, setReloginFailure] = useState<{ email: string; error: string } | null>(null);
@@ -435,13 +436,27 @@ export function AccountsPage() {
         limit: targetPageSize,
         offset: (targetPage - 1) * targetPageSize,
       });
-      const nextTotal = Number(data.total || 0);
+      const responseTotal = data.total;
+      const hasExactTotal = responseTotal !== null && responseTotal !== undefined
+        && Number.isFinite(Number(responseTotal));
+      const responseCount = Number(data.count ?? data.items?.length ?? 0);
+      const offset = (targetPage - 1) * targetPageSize;
+      const nextHasMore = typeof data.has_more === "boolean"
+        ? data.has_more
+        : responseCount >= targetPageSize;
+      const nextTotal = hasExactTotal
+        ? Number(responseTotal)
+        : Math.max(
+            total,
+            offset + responseCount + (nextHasMore ? 1 : 0)
+          );
       const maxPage = Math.max(1, Math.ceil(nextTotal / targetPageSize));
       if (targetPage > maxPage) {
         return load(maxPage, targetPageSize);
       }
       setItems(data.items || []);
       setTotal(nextTotal);
+      setHasMore(nextHasMore);
       setPage(targetPage);
       setPageSize(targetPageSize);
       if (detail) {
@@ -1035,7 +1050,7 @@ export function AccountsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={loading || page >= totalPages}
+                      disabled={loading || !hasMore}
                       onClick={() => void load(page + 1, pageSize)}
                     >
                       下一页
