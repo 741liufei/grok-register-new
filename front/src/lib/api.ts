@@ -162,7 +162,14 @@ export const api = {
     if (params.limit) sp.set("limit", String(params.limit));
     if (params.offset) sp.set("offset", String(params.offset));
     const qs = sp.toString();
-    return request<{ ok: boolean; items: AccountRecord[]; count: number; offset: number; limit: number }>(
+    return request<{
+      ok: boolean;
+      items: AccountRecord[];
+      total: number;
+      count: number;
+      offset: number;
+      limit: number;
+    }>(
       `/api/accounts${qs ? `?${qs}` : ""}`
     );
   },

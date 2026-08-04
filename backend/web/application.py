@@ -671,7 +671,7 @@ def create_app() -> FastAPI:
         email_disable_status: str = Query(""),
         q: str = Query(""),
         keyword: str = Query(""),
-        limit: int = Query(500, ge=1, le=10000),
+        limit: int = Query(20, ge=1, le=10000),
         offset: int = Query(0, ge=0),
     ) -> Dict[str, Any]:
         gr = _gr()
@@ -682,16 +682,21 @@ def create_app() -> FastAPI:
             status=status_norm,
             email_disable_status=str(email_disable_status or "").strip().lower(),
             keyword=keyword_norm,
-            limit=min(offset + limit, 10000),
+            limit=limit,
+            offset=offset,
         )
-        page = rows[offset : offset + limit]
+        total = store.count_results(
+            status=status_norm,
+            email_disable_status=str(email_disable_status or "").strip().lower(),
+            keyword=keyword_norm,
+        )
         return {
             "ok": True,
-            "total": len(rows) if offset == 0 and len(rows) < limit else None,
-            "count": len(page),
+            "total": total,
+            "count": len(rows),
             "offset": offset,
             "limit": limit,
-            "items": [_serialize_record(row) for row in page],
+            "items": [_serialize_record(row) for row in rows],
         }
 
     @app.get("/api/accounts/relogin/status")

@@ -102,6 +102,11 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
 
             filtered = store.list_results(email_disable_status="failed")
             self.assertEqual([row["email"] for row in filtered], ["failed@outlook.com"])
+            self.assertEqual(store.count_results(), 3)
+            self.assertEqual(len(store.list_results(limit=1, offset=1)), 1)
+            self.assertEqual(
+                store.count_results(email_disable_status="failed"), 1
+            )
             stats = store.stats()
             self.assertEqual(stats["email_disabled"], 1)
             self.assertEqual(stats["email_disable_failed"], 1)

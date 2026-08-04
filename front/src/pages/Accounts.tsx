@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Braces,
   Camera,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Copy,
@@ -71,60 +72,73 @@ function remoteImportLabel(status: string) {
   return labels[status] || status || "未配置";
 }
 
-function compactStatusTone(status: string) {
-  if (status === "success") return "text-emerald-700";
-  if (status === "failed" || status === "rejected" || status === "partial") return "text-red-600";
-  if (status === "ready" || status === "not_attempted") return "text-amber-700";
-  return "text-muted-foreground";
+function authStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    success: "成功",
+    failed: "失败",
+    rejected: "拒绝",
+    disabled: "关闭",
+    skipped: "跳过",
+    not_attempted: "未执行",
+  };
+  return labels[status] || status || "未知";
 }
 
-function compactStatusValue(status: string) {
-  if (status === "success") return "✓";
-  if (status === "failed" || status === "rejected") return "×";
-  if (status === "partial") return "!";
-  if (status === "ready" || status === "not_attempted") return "…";
-  if (status === "disabled") return "关";
-  return "-";
+function importStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    success: "已导入",
+    partial: "同步异常",
+    failed: "失败",
+    ready: "待导入",
+    not_configured: "未配置",
+  };
+  return labels[status] || status || "未知";
 }
 
-function AccountStatusSummary({ item }: { item: AccountRecord }) {
-  const entries = [
-    {
-      key: "auth",
-      label: "Auth",
-      status: item.cpa_status,
-      detail: `授权转换：${item.cpa_status || "未知"}`,
-      visible: true,
-    },
-    {
-      key: "cpa",
-      label: "CPA",
-      status: item.cpa_remote_status,
-      detail: `CPA 远程：${remoteImportLabel(item.cpa_remote_status)}`,
-      visible: item.cpa_remote_status !== "not_configured",
-    },
-    {
-      key: "grok2api",
-      label: "G2A",
-      status: item.grok2api_remote_status,
-      detail: `Grok2API：${remoteImportLabel(item.grok2api_remote_status)}`,
-      visible: item.grok2api_remote_status !== "not_configured",
-    },
-  ].filter((entry) => entry.visible);
+function compactBadgeVariant(status: string) {
+  if (status === "success") return "success" as const;
+  if (status === "failed" || status === "rejected") return "destructive" as const;
+  if (status === "partial" || status === "ready" || status === "not_attempted") return "warning" as const;
+  return "secondary" as const;
+}
 
+function CompactStatusBadge({ status, label }: { status: string; label: string }) {
   return (
-    <div className="min-w-0">
-      <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] font-medium">
-        {entries.map((entry, index) => (
-          <span key={entry.key} className="contents">
-            {index > 0 ? <span className="text-border">·</span> : null}
-            <span className={compactStatusTone(entry.status)} title={entry.detail}>
-              {entry.label} {compactStatusValue(entry.status)}
-            </span>
-          </span>
-        ))}
-      </div>
+    <Badge
+      variant={compactBadgeVariant(status)}
+      className="min-h-6 min-w-[58px] justify-center whitespace-nowrap rounded-md px-2 py-0 text-[11px] shadow-none"
+      title={label}
+    >
+      {label}
+    </Badge>
+  );
+}
+
+function MobileStatusGrid({ item }: { item: AccountRecord }) {
+  const entries = [
+    ["注册", item.status, statusLabel(item.status)],
+    ["Auth", item.cpa_status, authStatusLabel(item.cpa_status)],
+    ["CPA", item.cpa_remote_status, importStatusLabel(item.cpa_remote_status)],
+    ["G2A", item.grok2api_remote_status, importStatusLabel(item.grok2api_remote_status)],
+  ];
+  return (
+    <div className="grid grid-cols-4 overflow-hidden rounded-lg border bg-card">
+      {entries.map(([title, status, label], index) => (
+        <div key={title} className={`min-w-0 px-1.5 py-1.5 text-center ${index ? "border-l" : ""}`}>
+          <div className="text-[10px] leading-4 text-muted-foreground">{title}</div>
+          <div className={`truncate text-[11px] font-semibold leading-4 ${
+            status === "success"
+              ? "text-emerald-700"
+              : status === "failed" || status === "rejected"
+                ? "text-red-700"
+                : status === "partial" || status === "ready" || status === "not_attempted"
+                  ? "text-amber-700"
+                  : "text-slate-600"
+          }`} title={label}>
+            {label}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -378,7 +392,9 @@ export function AccountsPage() {
   const [detail, setDetail] = useState<AccountRecord | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [authJsonLoading, setAuthJsonLoading] = useState<"" | "copy-cpa" | "copy-grok2api">("");
-  const [visibleCount, setVisibleCount] = useState(50);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
   const [reloginPolling, setReloginPolling] = useState(true);
   const [reloginFailure, setReloginFailure] = useState<{ email: string; error: string } | null>(null);
@@ -397,24 +413,37 @@ export function AccountsPage() {
     [selected]
   );
   const allVisibleSelected = items.length > 0 && items.every((item) => selected[item.id]);
-  const visibleItems = items.slice(0, visibleCount);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageNumbers = useMemo(() => {
+    const count = Math.min(totalPages, 5);
+    const start = Math.max(1, Math.min(page - 2, totalPages - count + 1));
+    return Array.from({ length: count }, (_, index) => start + index);
+  }, [page, totalPages]);
 
   const showToast = (message: string, tone: "default" | "success" | "error" = "default") => {
     setToast({ message, tone });
     window.setTimeout(() => setToast({ message: "" }), 2200);
   };
 
-  const load = async () => {
+  const load = async (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true);
     try {
       const data = await api.accounts({
         status,
         emailDisableStatus,
         q: keyword,
-        limit: 1000,
+        limit: targetPageSize,
+        offset: (targetPage - 1) * targetPageSize,
       });
+      const nextTotal = Number(data.total || 0);
+      const maxPage = Math.max(1, Math.ceil(nextTotal / targetPageSize));
+      if (targetPage > maxPage) {
+        return load(maxPage, targetPageSize);
+      }
       setItems(data.items || []);
-      setVisibleCount(50);
+      setTotal(nextTotal);
+      setPage(targetPage);
+      setPageSize(targetPageSize);
       if (detail) {
         setDetail((data.items || []).find((item) => item.id === detail.id) || null);
       }
@@ -426,7 +455,7 @@ export function AccountsPage() {
   };
 
   useEffect(() => {
-    load();
+    void load(1, 20);
   }, []);
 
   useEffect(() => {
@@ -702,7 +731,7 @@ export function AccountsPage() {
         description="筛选和查看注册结果，在手机端使用卡片列表，在大屏设备上使用数据表格。"
         actions={
           <>
-            <Button variant="outline" onClick={load} disabled={loading}>
+            <Button variant="outline" onClick={() => void load(page, pageSize)} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
               刷新
             </Button>
@@ -768,12 +797,12 @@ export function AccountsPage() {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") load();
+                if (e.key === "Enter") void load(1, pageSize);
               }}
               aria-label="搜索账号记录"
             />
           </div>
-          <Button className="sm:col-span-2 lg:col-span-1" onClick={load} disabled={loading}>
+          <Button className="sm:col-span-2 lg:col-span-1" onClick={() => void load(1, pageSize)} disabled={loading}>
             <Search className="h-4 w-4" aria-hidden="true" />
             查询
           </Button>
@@ -785,7 +814,7 @@ export function AccountsPage() {
           <CardHeader className="flex-row items-center justify-between gap-3">
             <div>
               <CardTitle>注册记录</CardTitle>
-              <CardDescription>共 {items.length} 条，手机端每次展示 50 条。</CardDescription>
+              <CardDescription>共 {total} 条，第 {page} / {totalPages} 页。</CardDescription>
             </div>
             <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 text-sm text-muted-foreground hover:bg-muted xl:hidden">
               <input
@@ -804,7 +833,7 @@ export function AccountsPage() {
             ) : (
               <>
                 <div className="divide-y xl:hidden">
-                  {visibleItems.map((item) => (
+                  {items.map((item) => (
                     <article key={item.id} className="space-y-3 p-4">
                       <div className="flex items-start gap-3">
                         <label className="flex h-11 w-8 shrink-0 cursor-pointer items-center justify-center" aria-label={`选择 ${item.email}`}>
@@ -821,12 +850,14 @@ export function AccountsPage() {
                             <Mail className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                             <div className="break-all font-medium leading-6 text-foreground">{item.email || "-"}</div>
                           </div>
-                          <div className="mt-2 flex flex-wrap items-start gap-2">
-                            <AccountStatusSummary item={item} />
-                            <Badge variant={emailDisableVariant(item.email_disable_status)}>
-                              <Power className="mr-1 h-3 w-3" aria-hidden="true" />
-                              {emailDisableLabel(item.email_disable_status)}
-                            </Badge>
+                          <div className="mt-2 space-y-2">
+                            <MobileStatusGrid item={item} />
+                            <div className="flex justify-end">
+                              <Badge variant={emailDisableVariant(item.email_disable_status)}>
+                                <Power className="mr-1 h-3 w-3" aria-hidden="true" />
+                                邮箱 {emailDisableLabel(item.email_disable_status)}
+                              </Badge>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -855,24 +886,13 @@ export function AccountsPage() {
                       </div>
                     </article>
                   ))}
-                  {visibleCount < items.length ? (
-                    <div className="p-4">
-                      <Button
-                        variant="secondary"
-                        className="w-full"
-                        onClick={() => setVisibleCount((value) => Math.min(value + 50, items.length))}
-                      >
-                        加载更多（剩余 {items.length - visibleCount}）
-                      </Button>
-                    </div>
-                  ) : null}
                 </div>
 
-                <div className="hidden max-h-[720px] overflow-auto xl:block">
-                  <table className="w-full min-w-[860px] text-left text-sm">
-                    <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_hsl(var(--border))]">
+                <div className="hidden max-h-[720px] overflow-auto bg-slate-50/70 p-2 xl:block">
+                  <table className="w-full min-w-[1040px] border-separate text-left text-sm [border-spacing:0_6px]">
+                    <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                       <tr className="text-xs font-medium text-muted-foreground">
-                        <th className="w-12 px-4 py-3">
+                        <th className="w-12 px-4 py-2">
                           <input
                             type="checkbox"
                             checked={allVisibleSelected}
@@ -880,21 +900,24 @@ export function AccountsPage() {
                             aria-label="全选当前记录"
                           />
                         </th>
-                        <th className="px-3 py-3">邮箱</th>
-                        <th className="w-[180px] px-3 py-3">状态 / 入库</th>
-                        <th className="px-3 py-3">邮箱停用</th>
-                        <th className="px-3 py-3">服务商</th>
-                        <th className="px-3 py-3">耗时</th>
-                        <th className="sticky right-0 z-20 w-[170px] border-l bg-card px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)]">操作</th>
+                        <th className="px-3 py-2">账号</th>
+                        <th className="w-[82px] px-2 py-2 text-center">注册</th>
+                        <th className="w-[82px] px-2 py-2 text-center">Auth</th>
+                        <th className="w-[92px] px-2 py-2 text-center">CPA 入库</th>
+                        <th className="w-[104px] px-2 py-2 text-center">Grok2API</th>
+                        <th className="w-[98px] px-2 py-2 text-center">邮箱状态</th>
+                        <th className="px-3 py-2">服务商</th>
+                        <th className="px-3 py-2">耗时</th>
+                        <th className="sticky right-0 z-20 w-[170px] bg-slate-50/95 px-3 py-2 text-center backdrop-blur">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((item) => (
                         <tr
                           key={item.id}
-                          className={`group border-b transition-colors hover:bg-muted/45 ${detail?.id === item.id ? "bg-blue-50/70" : ""}`}
+                          className="group"
                         >
-                          <td className="px-4 py-3">
+                          <td className={`rounded-l-xl border-y border-l px-4 py-2.5 transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
                             <input
                               type="checkbox"
                               checked={!!selected[item.id]}
@@ -904,30 +927,57 @@ export function AccountsPage() {
                               aria-label={`选择 ${item.email}`}
                             />
                           </td>
-                          <td className="max-w-[250px] px-3 py-3">
-                            <div className="truncate font-medium text-foreground" title={item.email}>{item.email || "-"}</div>
-                            <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.finished_at || "-"}</div>
+                          <td className={`max-w-[270px] border-y px-3 py-2.5 transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <div className="flex min-w-0 items-center gap-2.5">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-primary ring-1 ring-blue-100">
+                                <Mail className="h-4 w-4" aria-hidden="true" />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium text-foreground" title={item.email}>{item.email || "-"}</div>
+                                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.finished_at || "未记录时间"}</div>
+                              </div>
+                            </div>
                           </td>
-                          <td className="px-3 py-3">
-                            <AccountStatusSummary item={item} />
+                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <CompactStatusBadge status={item.status} label={statusLabel(item.status)} />
                           </td>
-                          <td className="px-3 py-3">
-                            <Badge variant={emailDisableVariant(item.email_disable_status)}>
+                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <CompactStatusBadge status={item.cpa_status} label={authStatusLabel(item.cpa_status)} />
+                          </td>
+                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <CompactStatusBadge
+                              status={item.cpa_remote_status}
+                              label={importStatusLabel(item.cpa_remote_status)}
+                            />
+                          </td>
+                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <CompactStatusBadge
+                              status={item.grok2api_remote_status}
+                              label={importStatusLabel(item.grok2api_remote_status)}
+                            />
+                          </td>
+                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <Badge
+                              variant={emailDisableVariant(item.email_disable_status)}
+                              className="min-h-6 min-w-[62px] justify-center whitespace-nowrap rounded-md px-2 py-0 text-[11px] shadow-none"
+                            >
                               {emailDisableLabel(item.email_disable_status)}
                             </Badge>
                             {item.email_disable_error ? (
                               <div
-                                className="mt-1 max-w-[180px] truncate text-xs text-red-600"
+                                className="mt-1 max-w-[90px] truncate text-[10px] text-red-600"
                                 title={item.email_disable_error}
                               >
                                 {item.email_disable_error}
                               </div>
                             ) : null}
                           </td>
-                          <td className="px-3 py-3 text-muted-foreground">{item.provider || "-"}</td>
-                          <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatDuration(item.duration_seconds)}</td>
-                          <td className={`sticky right-0 z-[5] border-l px-3 py-3 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.55)] ${detail?.id === item.id ? "bg-blue-50" : "bg-card group-hover:bg-muted"}`}>
-                            <div className="flex items-center gap-1">
+                          <td className={`border-y px-3 py-2.5 text-muted-foreground transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">{item.provider || "-"}</span>
+                          </td>
+                          <td className={`border-y px-3 py-2.5 tabular-nums text-muted-foreground transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>{formatDuration(item.duration_seconds)}</td>
+                          <td className={`sticky right-0 z-[5] rounded-r-xl border-y border-r px-3 py-2.5 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.45)] transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                            <div className="flex items-center justify-center gap-1.5">
                               <Button size="sm" variant="outline" onClick={() => setDetail(item)}>
                                 查看
                               </Button>
@@ -938,6 +988,60 @@ export function AccountsPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>每页</span>
+                    <Select
+                      className="h-9 min-h-9 w-20 py-1"
+                      value={String(pageSize)}
+                      onChange={(event) => void load(1, Number(event.target.value))}
+                      aria-label="每页记录数"
+                    >
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </Select>
+                    <span>条，共 {total} 条</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 sm:justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={loading || page <= 1}
+                      onClick={() => void load(page - 1, pageSize)}
+                    >
+                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      上一页
+                    </Button>
+                    <span className="min-w-16 text-center text-xs font-medium text-muted-foreground sm:hidden">
+                      {page} / {totalPages}
+                    </span>
+                    <div className="hidden items-center gap-1 sm:flex" aria-label="页码">
+                      {pageNumbers.map((pageNumber) => (
+                        <Button
+                          key={pageNumber}
+                          size="sm"
+                          variant={pageNumber === page ? "default" : "outline"}
+                          className="h-9 min-h-9 w-9 px-0"
+                          disabled={loading}
+                          onClick={() => void load(pageNumber, pageSize)}
+                          aria-current={pageNumber === page ? "page" : undefined}
+                        >
+                          {pageNumber}
+                        </Button>
+                      ))}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={loading || page >= totalPages}
+                      onClick={() => void load(page + 1, pageSize)}
+                    >
+                      下一页
+                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </div>
                 </div>
               </>
             )}

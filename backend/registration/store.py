@@ -257,6 +257,7 @@ class RegistrationRepository:
         email_disable_status: str = "",
         keyword: str = "",
         limit: int = 2000,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         clauses = []
         params: List[Any] = []
@@ -278,7 +279,8 @@ class RegistrationRepository:
             params.extend([like, like, like, like, like, like, like])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         safe_limit = max(1, min(int(limit or 2000), 10000))
-        params.append(safe_limit)
+        safe_offset = max(0, int(offset or 0))
+        params.extend([safe_limit, safe_offset])
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
@@ -286,11 +288,44 @@ class RegistrationRepository:
                 FROM registration_results
                 {where}
                 ORDER BY finished_at DESC, id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def count_results(
+        self,
+        *,
+        status: str = "",
+        email_disable_status: str = "",
+        keyword: str = "",
+    ) -> int:
+        """返回与账号列表相同筛选条件下的记录总数。"""
+        clauses = []
+        params: List[Any] = []
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status:
+            clauses.append("status = ?")
+            params.append(normalized_status)
+        normalized_disable_status = str(email_disable_status or "").strip().lower()
+        if normalized_disable_status:
+            clauses.append("email_disable_status = ?")
+            params.append(normalized_disable_status)
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            like = f"%{normalized_keyword}%"
+            clauses.append(
+                "(email LIKE ? OR provider LIKE ? OR failure_reason LIKE ? OR auth_info LIKE ? "
+                "OR batch_id LIKE ? OR email_account_id LIKE ? OR email_disable_error LIKE ?)"
+            )
+            params.extend([like, like, like, like, like, like, like])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM registration_results {where}", params
+            ).fetchone()
+        return int(row["total"] or 0)
 
     def get_results_by_ids(self, ids: Iterable[int | str]) -> List[Dict[str, Any]]:
         """按主键批量读取记录，保持传入顺序。"""
