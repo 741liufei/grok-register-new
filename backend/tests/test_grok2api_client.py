@@ -3,12 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.integrations.grok2api_client import (
-    Grok2APIImportError,
-    import_auth_file,
-    import_with_credentials,
-    login,
-)
+from backend.integrations.grok2api_client import Grok2APIClient, Grok2APIImportError
 
 
 class FakeResponse:
@@ -32,26 +27,45 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
+        self.closed = False
 
     def post(self, url, **kwargs):
-        if "multipart" in kwargs:
-            kwargs = dict(kwargs)
-        self.calls.append((url, kwargs))
+        self.calls.append((url, dict(kwargs)))
         return self.responses.pop(0)
+
+    def close(self):
+        self.closed = True
 
 
 class Grok2APIClientTests(unittest.TestCase):
-    def test_login_returns_fresh_access_token(self):
+    def test_from_config_validates_and_builds_client(self):
+        config = {
+            "grok2api_remote_url": "https://example.test/",
+            "grok2api_remote_username": "admin",
+            "grok2api_remote_password": "secret",
+        }
+        self.assertTrue(Grok2APIClient.is_configured(config))
+        client = Grok2APIClient.from_config(config, session=FakeSession([]))
+        self.assertEqual(client.base_url, "https://example.test")
+        self.assertEqual(client.username, "admin")
+
+    def test_login_caches_access_token_on_instance(self):
         session = FakeSession(
             [FakeResponse(payload={"data": {"tokens": {"accessToken": "fresh-token"}}})]
         )
-        token = login("https://example.test/", "admin", "secret", session=session)
-        self.assertEqual(token, "fresh-token")
-        self.assertEqual(session.calls[0][0], "https://example.test/api/admin/v1/auth/login")
-        self.assertEqual(session.calls[0][1]["json"], {"username": "admin", "password": "secret"})
+        client = Grok2APIClient(
+            "https://example.test/", "admin", "secret", session=session
+        )
+        self.assertEqual(client.login(), "fresh-token")
+        self.assertEqual(client.login(), "fresh-token")
+        self.assertEqual(client.access_token, "fresh-token")
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(
+            session.calls[0][0], "https://example.test/api/admin/v1/auth/login"
+        )
 
-    def test_import_uses_files_field_and_parses_complete_event(self):
-        response = FakeResponse(
+    def test_import_logs_in_uses_multipart_and_parses_complete_event(self):
+        import_response = FakeResponse(
             lines=[
                 b": connected",
                 b"",
@@ -63,46 +77,55 @@ class Grok2APIClientTests(unittest.TestCase):
                 b"",
             ]
         )
-        session = FakeSession([response])
+        session = FakeSession(
+            [
+                FakeResponse(payload={"data": {"tokens": {"accessToken": "fresh-token"}}}),
+                import_response,
+            ]
+        )
+        client = Grok2APIClient(
+            "https://example.test", "admin", "secret", session=session
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "g2a-fixture.json"
             path.write_text(json.dumps({"provider": "grok_build"}), encoding="utf-8")
-            result = import_auth_file("https://example.test", "token", path, session=session)
+            result = client.import_auth_file(path)
         self.assertEqual(result["created"], 1)
-        self.assertIn("multipart", session.calls[0][1])
-        self.assertTrue(response.closed)
+        self.assertIn("multipart", session.calls[1][1])
+        self.assertEqual(
+            session.calls[1][1]["headers"]["Authorization"], "Bearer fresh-token"
+        )
+        self.assertTrue(import_response.closed)
 
     def test_import_surfaces_sse_error(self):
         session = FakeSession(
-            [FakeResponse(lines=[b"event: error", b'data: {"message":"fixture failed"}', b""])]
+            [
+                FakeResponse(payload={"data": {"tokens": {"accessToken": "fresh-token"}}}),
+                FakeResponse(
+                    lines=[
+                        b"event: error",
+                        b'data: {"message":"fixture failed"}',
+                        b"",
+                    ]
+                ),
+            ]
+        )
+        client = Grok2APIClient(
+            "https://example.test", "admin", "secret", session=session
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "g2a-fixture.json"
             path.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(Grok2APIImportError, "fixture failed"):
-                import_auth_file("https://example.test", "token", path, session=session)
+                client.import_auth_file(path)
 
-    def test_import_with_credentials_logs_in_before_upload(self):
-        session = FakeSession(
-            [
-                FakeResponse(payload={"data": {"tokens": {"accessToken": "fresh-token"}}}),
-                FakeResponse(lines=[b"event: complete", b'data: {"created":0,"updated":1}', b""]),
-            ]
+    def test_context_manager_closes_owned_session_only(self):
+        external = FakeSession([])
+        client = Grok2APIClient(
+            "https://example.test", "admin", "secret", session=external
         )
-        config = {
-            "grok2api_remote_url": "https://example.test",
-            "grok2api_remote_username": "admin",
-            "grok2api_remote_password": "secret",
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "g2a-fixture.json"
-            path.write_text("{}", encoding="utf-8")
-            result = import_with_credentials(config, path, session=session)
-        self.assertEqual(result["updated"], 1)
-        self.assertEqual(len(session.calls), 2)
-        self.assertEqual(
-            session.calls[1][1]["headers"]["Authorization"], "Bearer fresh-token"
-        )
+        client.close()
+        self.assertFalse(external.closed)
 
 
 if __name__ == "__main__":

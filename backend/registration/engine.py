@@ -913,7 +913,7 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
     remote_url = str(config.get("cpa_remote_url", "") or "").strip()
     management_key = str(config.get("cpa_management_key", "") or "").strip()
     g2a_dir = str(config.get("grok2api_auth_dir", "") or "").strip()
-    g2a_remote_configured = _grok2api.remote_configured(config)
+    g2a_remote_configured = _grok2api.Grok2APIClient.is_configured(config)
     g2a_auto_import = bool(config.get("grok2api_auto_import", False))
     _set_result(
         cpa_remote_status="ready" if remote_url and management_key else "not_configured",
@@ -1050,7 +1050,8 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                 auth_entries.append(f"Grok2API: {gpath}")
                 if g2a_remote_configured and g2a_auto_import:
                     try:
-                        remote_result = _grok2api.import_with_credentials(config, gpath)
+                        with _grok2api.Grok2APIClient.from_config(config) as client:
+                            remote_result = client.import_auth_file(gpath)
                         imported_at = RegistrationRepository.now_text()
                         remote_status = (
                             "partial"

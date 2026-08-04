@@ -353,9 +353,9 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
     item["cpa_enabled"] = bool(item.get("cpa_enabled"))
     item["sso_saved"] = bool(item.get("sso_saved"))
     raw_config = _gr().config
-    from backend.integrations.grok2api_client import remote_configured
+    from backend.integrations.grok2api_client import Grok2APIClient
 
-    item["grok2api_remote_configured"] = remote_configured(raw_config)
+    item["grok2api_remote_configured"] = Grok2APIClient.is_configured(raw_config)
     for kind in ("cpa", "grok2api"):
         try:
             _find_account_auth_file(item, raw_config, kind)
@@ -725,9 +725,8 @@ def create_app() -> FastAPI:
     def api_account_grok2api_import(account_id: int) -> Dict[str, Any]:
         """把已生成的 grok_build JSON 导入配置的远程 Grok2API。"""
         from backend.integrations.grok2api_client import (
+            Grok2APIClient,
             Grok2APIImportError,
-            import_with_credentials,
-            remote_configured,
         )
 
         gr = _gr()
@@ -736,7 +735,7 @@ def create_app() -> FastAPI:
         rows = store.get_results_by_ids([account_id])
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
-        if not remote_configured(gr.config):
+        if not Grok2APIClient.is_configured(gr.config):
             raise HTTPException(
                 status_code=400,
                 detail="请先在系统设置完整配置 Grok2API API 地址、管理员账号和密码",
@@ -748,7 +747,8 @@ def create_app() -> FastAPI:
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
-            result = import_with_credentials(gr.config, path)
+            with Grok2APIClient.from_config(gr.config) as client:
+                result = client.import_auth_file(path)
         except Grok2APIImportError as exc:
             store.update_remote_import_status(
                 account_id,
