@@ -288,6 +288,8 @@ export function AccountsPage() {
   const [authJsonLoading, setAuthJsonLoading] = useState<"" | "copy-cpa" | "copy-grok2api">("");
   const [visibleCount, setVisibleCount] = useState(50);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
+  const [reloginPolling, setReloginPolling] = useState(true);
+  const [reloginFailure, setReloginFailure] = useState<{ email: string; error: string } | null>(null);
   const [moreMenu, setMoreMenu] = useState<{
     item: AccountRecord;
     top: number;
@@ -335,30 +337,39 @@ export function AccountsPage() {
   }, []);
 
   useEffect(() => {
+    if (!reloginPolling) return;
     let active = true;
-    let lastRunning = false;
+    let timer: number | undefined;
+    let lastRunning = !!relogin?.running;
     const check = async () => {
       try {
         const result = await api.reloginStatus();
         if (!active) return;
         const next = result.relogin;
         setRelogin(next);
-        if (lastRunning && !next.running) {
-          await load();
-          showToast(next.error ? `重新登录失败：${next.error}` : "重新登录完成，授权文件已刷新", next.error ? "error" : "success");
+        if (!next.running) {
+          if (lastRunning) await load();
+          if (next.error) {
+            setReloginFailure({ email: next.email, error: next.error });
+          } else if (lastRunning) {
+            showToast("重新登录完成，授权文件已刷新", "success");
+          }
+          setReloginPolling(false);
+          return;
         }
         lastRunning = next.running;
+        if (next.running) timer = window.setTimeout(check, 2000);
+        else setReloginPolling(false);
       } catch {
-        // 状态轮询失败不覆盖账号列表操作。
+        if (active) timer = window.setTimeout(check, 5000);
       }
     };
     void check();
-    const timer = window.setInterval(check, 2000);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
     };
-  }, []);
+  }, [reloginPolling]);
 
   useEffect(() => {
     if (!detail) return;
@@ -457,6 +468,8 @@ export function AccountsPage() {
     try {
       const result = await api.startRelogin(item.id);
       setRelogin(result.relogin);
+      setReloginFailure(null);
+      setReloginPolling(!!result.relogin.running);
       showToast("已启动重新登录，请稍候", "success");
     } catch (err: any) {
       showToast(err.message || "启动重新登录失败", "error");
@@ -570,6 +583,20 @@ export function AccountsPage() {
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           <span className="font-medium">正在重新登录 {relogin.email}</span>
           <span className="text-blue-700">{relogin.stage}</span>
+        </div>
+      ) : null}
+
+      {reloginFailure ? (
+        <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <div className="min-w-0">
+            <div className="font-medium">重新登录失败</div>
+            <div className="mt-1 break-all text-red-700">
+              {reloginFailure.email ? `${reloginFailure.email}：` : ""}{reloginFailure.error}
+            </div>
+          </div>
+          <Button size="icon" variant="ghost" className="shrink-0" onClick={() => setReloginFailure(null)} aria-label="关闭重新登录失败提醒">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
         </div>
       ) : null}
 

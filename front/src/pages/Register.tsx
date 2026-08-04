@@ -36,6 +36,7 @@ export function RegisterPage() {
   const [logViewCleared, setLogViewCleared] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [busyAction, setBusyAction] = useState<BusyAction>("");
+  const [jobPolling, setJobPolling] = useState(true);
   const [checks, setChecks] = useState<Array<{ name: string; ok: boolean; detail: string }>>([]);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
@@ -56,8 +57,12 @@ export function RegisterPage() {
     window.setTimeout(() => setToast({ message: "" }), 2200);
   };
 
-  const refreshLogs = async () => {
-    if (pollingRef.current) return;
+  const emitJobState = (running: boolean) => {
+    window.dispatchEvent(new CustomEvent("grok-job-state", { detail: { running } }));
+  };
+
+  const refreshLogs = async (): Promise<JobStatus | null> => {
+    if (pollingRef.current) return null;
     pollingRef.current = true;
     const viewVersion = logViewVersionRef.current;
     try {
@@ -71,8 +76,10 @@ export function RegisterPage() {
         afterIdRef.current = freshLogs[freshLogs.length - 1].id;
         setLogViewCleared(false);
       }
+      return data.job;
     } catch {
       // 忽略短暂轮询失败，下一轮继续同步。
+      return null;
     } finally {
       pollingRef.current = false;
     }
@@ -89,17 +96,28 @@ export function RegisterPage() {
   }, []);
 
   useEffect(() => {
+    if (!jobPolling) return;
     let cancelled = false;
+    let timer: number | undefined;
     const tick = async () => {
-      if (!cancelled) await refreshLogs();
+      if (cancelled) return;
+      const current = await refreshLogs();
+      if (cancelled) return;
+      if (current?.running) {
+        timer = window.setTimeout(tick, 1500);
+      } else if (current) {
+        setJobPolling(false);
+        emitJobState(false);
+      } else {
+        timer = window.setTimeout(tick, 3000);
+      }
     };
-    tick();
-    const timer = window.setInterval(tick, 1500);
+    void tick();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
     };
-  }, []);
+  }, [jobPolling]);
 
   useEffect(() => {
     if (autoScroll && logRef.current) {
@@ -112,6 +130,8 @@ export function RegisterPage() {
     try {
       const data = await api.startJob({ count, workers });
       setJob(data.job);
+      setJobPolling(!!data.job.running);
+      emitJobState(!!data.job.running);
       showToast("注册任务已启动", "success");
     } catch (err: any) {
       showToast(err.message || "启动失败", "error");
@@ -125,6 +145,8 @@ export function RegisterPage() {
     try {
       const data = await api.stopJob();
       setJob(data.job);
+      setJobPolling(!!data.job.running);
+      emitJobState(!!data.job.running);
       showToast("已请求停止", "success");
     } catch (err: any) {
       showToast(err.message || "停止失败", "error");
@@ -152,6 +174,8 @@ export function RegisterPage() {
     try {
       const data = await api.killAllBrowsers();
       setJob(data.job);
+      setJobPolling(!!data.job.running);
+      emitJobState(!!data.job.running);
       showToast(
         `已终止 ${data.killed} 个进程，清理 ${data.profiles_cleaned} 个资料目录`,
         "success"
