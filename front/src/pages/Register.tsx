@@ -28,9 +28,15 @@ import {
 
 type BusyAction = "" | "start" | "stop" | "check" | "kill";
 
+function normalizeInteger(value: string | number, min: number, max: number, fallback = min) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 export function RegisterPage() {
-  const [count, setCount] = useState(1);
-  const [workers, setWorkers] = useState(1);
+  const [count, setCount] = useState("1");
+  const [workers, setWorkers] = useState("1");
   const [job, setJob] = useState<JobStatus | null>(null);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [logViewCleared, setLogViewCleared] = useState(false);
@@ -89,8 +95,8 @@ export function RegisterPage() {
     api
       .getConfig()
       .then((data) => {
-        setCount(Number(data.config.register_count || 1));
-        setWorkers(Number(data.config.register_workers || 1));
+        setCount(String(normalizeInteger(data.config.register_count || 1, 1, 1000)));
+        setWorkers(String(normalizeInteger(data.config.register_workers || 1, 1, 8)));
       })
       .catch(() => undefined);
   }, []);
@@ -128,7 +134,11 @@ export function RegisterPage() {
   const onStart = async () => {
     setBusyAction("start");
     try {
-      const data = await api.startJob({ count, workers });
+      const normalizedCount = normalizeInteger(count, 1, 1000);
+      const normalizedWorkers = normalizeInteger(workers, 1, 8);
+      setCount(String(normalizedCount));
+      setWorkers(String(normalizedWorkers));
+      const data = await api.startJob({ count: normalizedCount, workers: normalizedWorkers });
       setJob(data.job);
       setJobPolling(!!data.job.running);
       emitJobState(!!data.job.running);
@@ -228,7 +238,8 @@ export function RegisterPage() {
                   max={1000}
                   value={count}
                   disabled={!!job?.running}
-                  onChange={(e) => setCount(Math.max(1, Number(e.target.value || 1)))}
+                  onChange={(e) => setCount(e.target.value)}
+                  onBlur={() => setCount(String(normalizeInteger(count, 1, 1000)))}
                 />
               </div>
               <div className="space-y-2">
@@ -241,7 +252,8 @@ export function RegisterPage() {
                   max={8}
                   value={workers}
                   disabled={!!job?.running}
-                  onChange={(e) => setWorkers(Math.max(1, Math.min(8, Number(e.target.value || 1))))}
+                  onChange={(e) => setWorkers(e.target.value)}
+                  onBlur={() => setWorkers(String(normalizeInteger(workers, 1, 8)))}
                 />
               </div>
             </div>
