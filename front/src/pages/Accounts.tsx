@@ -43,6 +43,16 @@ function statusVariant(status: string) {
   return "secondary" as const;
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    success: "成功",
+    failure: "失败",
+    skipped: "跳过",
+    cancelled: "已停止",
+  };
+  return labels[status] || status || "未知";
+}
+
 function cpaVariant(status: string) {
   if (status === "success") return "success" as const;
   if (status === "failed" || status === "rejected") return "destructive" as const;
@@ -59,6 +69,64 @@ function remoteImportLabel(status: string) {
     not_configured: "未配置",
   };
   return labels[status] || status || "未配置";
+}
+
+function compactStatusTone(status: string) {
+  if (status === "success") return "text-emerald-700";
+  if (status === "failed" || status === "rejected" || status === "partial") return "text-red-600";
+  if (status === "ready" || status === "not_attempted") return "text-amber-700";
+  return "text-muted-foreground";
+}
+
+function compactStatusValue(status: string) {
+  if (status === "success") return "✓";
+  if (status === "failed" || status === "rejected") return "×";
+  if (status === "partial") return "!";
+  if (status === "ready" || status === "not_attempted") return "…";
+  if (status === "disabled") return "关";
+  return "-";
+}
+
+function AccountStatusSummary({ item }: { item: AccountRecord }) {
+  const entries = [
+    {
+      key: "auth",
+      label: "Auth",
+      status: item.cpa_status,
+      detail: `授权转换：${item.cpa_status || "未知"}`,
+      visible: true,
+    },
+    {
+      key: "cpa",
+      label: "CPA",
+      status: item.cpa_remote_status,
+      detail: `CPA 远程：${remoteImportLabel(item.cpa_remote_status)}`,
+      visible: item.cpa_remote_status !== "not_configured",
+    },
+    {
+      key: "grok2api",
+      label: "G2A",
+      status: item.grok2api_remote_status,
+      detail: `Grok2API：${remoteImportLabel(item.grok2api_remote_status)}`,
+      visible: item.grok2api_remote_status !== "not_configured",
+    },
+  ].filter((entry) => entry.visible);
+
+  return (
+    <div className="min-w-0">
+      <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] font-medium">
+        {entries.map((entry, index) => (
+          <span key={entry.key} className="contents">
+            {index > 0 ? <span className="text-border">·</span> : null}
+            <span className={compactStatusTone(entry.status)} title={entry.detail}>
+              {entry.label} {compactStatusValue(entry.status)}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function emailDisableVariant(status: string) {
@@ -753,15 +821,8 @@ export function AccountsPage() {
                             <Mail className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                             <div className="break-all font-medium leading-6 text-foreground">{item.email || "-"}</div>
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
-                            <Badge variant={cpaVariant(item.cpa_status)}>CPA {item.cpa_status || "-"}</Badge>
-                            <Badge variant={cpaVariant(item.cpa_remote_status)}>
-                              CPA {remoteImportLabel(item.cpa_remote_status)}
-                            </Badge>
-                            <Badge variant={cpaVariant(item.grok2api_remote_status)}>
-                              Grok2API {remoteImportLabel(item.grok2api_remote_status)}
-                            </Badge>
+                          <div className="mt-2 flex flex-wrap items-start gap-2">
+                            <AccountStatusSummary item={item} />
                             <Badge variant={emailDisableVariant(item.email_disable_status)}>
                               <Power className="mr-1 h-3 w-3" aria-hidden="true" />
                               {emailDisableLabel(item.email_disable_status)}
@@ -820,7 +881,7 @@ export function AccountsPage() {
                           />
                         </th>
                         <th className="px-3 py-3">邮箱</th>
-                        <th className="px-3 py-3">状态</th>
+                        <th className="w-[180px] px-3 py-3">状态 / 入库</th>
                         <th className="px-3 py-3">邮箱停用</th>
                         <th className="px-3 py-3">服务商</th>
                         <th className="px-3 py-3">耗时</th>
@@ -848,16 +909,7 @@ export function AccountsPage() {
                             <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.finished_at || "-"}</div>
                           </td>
                           <td className="px-3 py-3">
-                            <div className="flex flex-col items-start gap-1.5">
-                              <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
-                              <Badge variant={cpaVariant(item.cpa_status)}>CPA {item.cpa_status || "-"}</Badge>
-                              <Badge variant={cpaVariant(item.cpa_remote_status)}>
-                                CPA {remoteImportLabel(item.cpa_remote_status)}
-                              </Badge>
-                              <Badge variant={cpaVariant(item.grok2api_remote_status)}>
-                                Grok2API {remoteImportLabel(item.grok2api_remote_status)}
-                              </Badge>
-                            </div>
+                            <AccountStatusSummary item={item} />
                           </td>
                           <td className="px-3 py-3">
                             <Badge variant={emailDisableVariant(item.email_disable_status)}>
