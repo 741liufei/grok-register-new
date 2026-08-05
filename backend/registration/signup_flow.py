@@ -165,9 +165,9 @@ def _native_type_element(element, value: str, per_char: bool = True) -> bool:
         try:
             current = str(element.property("value") or "")
         except Exception:
-            current = ""
-        # 某些 React 控件异步更新 property；调用成功且无法读取值时交给页面推进检查。
-        return not current or current.strip() == text.strip()
+            current = None
+        # property 无法读取时交给页面推进检查；明确读到空值表示输入没有生效。
+        return current is None or current.strip() == text.strip()
     except Exception:
         return False
 
@@ -206,13 +206,13 @@ def _native_input_candidates(kind: str):
                 score = 100 if max_len == 1 else 0
                 score += 80 if autocomplete == "one-time-code" else 0
             elif kind == "given":
-                score = 100 if testid == "givenname" or name == "givenname" else 0
+                score = 100 if testid in ("givenname", "firstname") or name in ("givenname", "firstname") else 0
                 score += 90 if autocomplete == "given-name" else 0
-                score += 40 if "given" in meta or "名" in meta else 0
+                score += 40 if any(x in meta for x in ("given", "first name", "firstname", "名")) else 0
             elif kind == "family":
-                score = 100 if testid == "familyname" or name == "familyname" else 0
+                score = 100 if testid in ("familyname", "lastname", "surname") or name in ("familyname", "lastname", "surname") else 0
                 score += 90 if autocomplete == "family-name" else 0
-                score += 40 if "family" in meta or "姓" in meta else 0
+                score += 40 if any(x in meta for x in ("family", "last name", "lastname", "surname", "姓")) else 0
             elif kind == "password":
                 score = 110 if typ == "password" else 0
                 score += 90 if name == "password" or "password" in autocomplete else 0
@@ -453,8 +453,8 @@ def has_profile_form(log_callback=None):
         return bool(
             page.run_js(
                 """
-const givenInput = document.querySelector('input[data-testid="givenName"], input[name="givenName"], input[autocomplete="given-name"]');
-const familyInput = document.querySelector('input[data-testid="familyName"], input[name="familyName"], input[autocomplete="family-name"]');
+const givenInput = document.querySelector('input[data-testid="givenName"], input[data-testid="firstName"], input[name="givenName"], input[name="firstName"], input[autocomplete="given-name"]');
+const familyInput = document.querySelector('input[data-testid="familyName"], input[data-testid="lastName"], input[name="familyName"], input[name="lastName"], input[name="surname"], input[autocomplete="family-name"]');
 const passwordInput = document.querySelector('input[data-testid="password"], input[name="password"], input[type="password"]');
 return !!(givenInput && familyInput && passwordInput);
             """
@@ -1068,8 +1068,9 @@ return 'not-ready';
             sleep_with_cancel(0.5, cancel_callback)
             continue
 
-        clicked = _native_click_action(("确认邮箱", "继续", "下一步", "confirm", "continue", "next", "confirmar", "confirmer", "bestätigen", "確認"))
-        if not clicked:
+        native_clicked = _native_click_action(("确认邮箱", "继续", "下一步", "confirm", "continue", "next", "confirmar", "confirmer", "bestätigen", "確認"))
+        clicked = ""
+        if not native_clicked:
             clicked = page.run_js(
                 r"""
 function isVisible(node) {
@@ -1103,9 +1104,10 @@ return 'clicked';
                 """
             )
 
-        if clicked == "clicked" or clicked == "no-button":
+        if native_clicked or clicked in ("clicked", "no-button"):
             if log_callback:
-                log_callback(f"[*] 已填写验证码并提交: {code}")
+                click_detail = f" ({native_clicked})" if native_clicked else ""
+                log_callback(f"[*] 已填写验证码并提交: {code}{click_detail}")
             sleep_with_cancel(1.5, cancel_callback)
             return code
 
@@ -1388,6 +1390,7 @@ def fill_profile_and_submit(timeout=120, log_callback=None, cancel_callback=None
     last_cf_retry_at = 0.0
     last_cf_log_at = 0.0
     last_logged_token_len = None
+    last_form_diag_at = 0.0
 
     def _maybe_log_cf_wait(message, token_len):
         nonlocal last_cf_log_at, last_logged_token_len
@@ -1445,8 +1448,8 @@ function setInputValue(input, value) {
     return String(input.value || '').trim() === String(value || '').trim();
 }
 
-const givenInput = pickInput('input[data-testid="givenName"], input[name="givenName"], input[autocomplete="given-name"], input[aria-label*="名"]');
-const familyInput = pickInput('input[data-testid="familyName"], input[name="familyName"], input[autocomplete="family-name"], input[aria-label*="姓"]');
+const givenInput = pickInput('input[data-testid="givenName"], input[data-testid="firstName"], input[name="givenName"], input[name="firstName"], input[id*="firstName" i], input[autocomplete="given-name"], input[aria-label*="first name" i], input[placeholder*="first name" i], input[aria-label*="名"]');
+const familyInput = pickInput('input[data-testid="familyName"], input[data-testid="lastName"], input[name="familyName"], input[name="lastName"], input[name="surname"], input[id*="lastName" i], input[autocomplete="family-name"], input[aria-label*="last name" i], input[placeholder*="last name" i], input[aria-label*="姓"]');
 const passwordInput = pickInput('input[data-testid="password"], input[name="password"], input[type="password"], input[autocomplete="new-password"]');
 
 if (!givenInput || !familyInput || !passwordInput) return 'not-ready';
@@ -1526,6 +1529,27 @@ return 'filled-no-submit';
                 sleep_with_cancel(0.5, cancel_callback)
                 continue
             elif filled == "not-ready":
+                now = time.time()
+                if log_callback and now - last_form_diag_at >= 5:
+                    last_form_diag_at = now
+                    snapshot = page.run_js(
+                        r"""
+const inputs = Array.from(document.querySelectorAll('input')).filter((node) => {
+  const style = window.getComputedStyle(node);
+  const rect = node.getBoundingClientRect();
+  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+}).slice(0, 8).map((node) => [
+  node.type || 'text', node.name || '', node.id || '', node.getAttribute('data-testid') || '',
+  node.autocomplete || '', node.getAttribute('aria-label') || '', node.placeholder || ''
+].join('/'));
+return { url: location.href, inputs };
+                        """
+                    )
+                    if isinstance(snapshot, dict):
+                        input_text = " | ".join(str(x) for x in snapshot.get("inputs", []))
+                        log_callback(
+                            f"[Debug] 等待资料表单字段: url={snapshot.get('url', '')}; inputs={input_text or 'none'}"
+                        )
                 sleep_with_cancel(0.5, cancel_callback)
                 continue
 
