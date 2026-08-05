@@ -39,6 +39,12 @@ class SignupFlowTests(unittest.TestCase):
             signup_flow, "_native_click_action", return_value="Continue"
         ), mock.patch.object(
             signup_flow, "sleep_with_cancel"
+        ), mock.patch.object(
+            signup_flow, "_profile_page_snapshot", return_value={"profile_form": False}
+        ), mock.patch.object(
+            signup_flow,
+            "_wait_profile_page_after_code",
+            return_value={"profile_form": True, "url": "https://accounts.x.ai/sign-up"},
         ), mock.patch.object(signup_flow, "page", page):
             result = signup_flow.fill_code_and_submit(
                 "fixture@example.com",
@@ -50,6 +56,27 @@ class SignupFlowTests(unittest.TestCase):
         self.assertEqual(result, "123456")
         self.assertFalse(page.run_js.called)
         self.assertTrue(any("Continue" in message for message in logs))
+
+    def test_code_submission_detects_profile_page_before_refilling_otp(self):
+        logs = []
+        with mock.patch.dict(
+            signup_flow._deps,
+            {"get_oai_code": mock.Mock(return_value="123456")},
+        ), mock.patch.object(
+            signup_flow,
+            "_profile_page_snapshot",
+            return_value={"profile_form": True, "url": "https://accounts.x.ai/sign-up"},
+        ), mock.patch.object(signup_flow, "_native_fill_code") as fill_code:
+            result = signup_flow.fill_code_and_submit(
+                "fixture@example.com",
+                "fixture-token",
+                timeout=1,
+                log_callback=logs.append,
+            )
+
+        self.assertEqual(result, "123456")
+        self.assertFalse(fill_code.called)
+        self.assertTrue(any("页面元素识别资料填写页" in message for message in logs))
 
 
 if __name__ == "__main__":

@@ -448,20 +448,86 @@ def open_signup_page(log_callback=None, cancel_callback=None):
 
 
 def has_profile_form(log_callback=None):
+    return bool(_profile_page_snapshot().get("profile_form"))
+
+
+def _profile_page_snapshot():
+    """读取验证码后的页面状态，用元素特征确认是否已进入资料页。"""
     refresh_active_page()
     try:
-        return bool(
-            page.run_js(
-                """
-const givenInput = document.querySelector('input[data-testid="givenName"], input[data-testid="firstName"], input[name="givenName"], input[name="firstName"], input[autocomplete="given-name"]');
-const familyInput = document.querySelector('input[data-testid="familyName"], input[data-testid="lastName"], input[name="familyName"], input[name="lastName"], input[name="surname"], input[autocomplete="family-name"]');
-const passwordInput = document.querySelector('input[data-testid="password"], input[name="password"], input[type="password"]');
-return !!(givenInput && familyInput && passwordInput);
+        result = page.run_js(
+            r"""
+function isVisible(node) {
+  if (!node) return false;
+  const style = window.getComputedStyle(node);
+  const rect = node.getBoundingClientRect();
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+    && rect.width > 0 && rect.height > 0 && !node.disabled && !node.readOnly;
+}
+function inputMeta(node) {
+  const labels = [];
+  if (node.id) {
+    const label = document.querySelector(`label[for="${CSS.escape(node.id)}"]`);
+    if (label) labels.push(label.innerText || label.textContent || '');
+  }
+  const parentLabel = node.closest('label');
+  if (parentLabel) labels.push(parentLabel.innerText || parentLabel.textContent || '');
+  return [
+    node.name, node.id, node.getAttribute('data-testid'), node.autocomplete,
+    node.getAttribute('aria-label'), node.placeholder, ...labels,
+  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+const inputs = Array.from(document.querySelectorAll('input')).filter((node) => {
+  const type = String(node.type || 'text').toLowerCase();
+  return isVisible(node) && !['hidden', 'submit', 'button', 'checkbox', 'radio', 'file'].includes(type);
+});
+const described = inputs.map((node) => ({
+  node,
+  type: String(node.type || 'text').toLowerCase(),
+  meta: inputMeta(node),
+}));
+const given = described.find(({ meta }) => /(^|\s|[-_])(given|first)(\s|[-_]?name|$)|given-name|名字|名/.test(meta));
+const family = described.find(({ meta }) => /(^|\s|[-_])(family|last|sur)(\s|[-_]?(name|surname)|$)|family-name|姓/.test(meta));
+const password = described.find(({ type, meta }) => type === 'password' || /password|new-password|密码/.test(meta));
+const code = described.find(({ node, meta }) => {
+  const mode = String(node.inputMode || '').toLowerCase();
+  return /code|otp|verif|one-time|验证码/.test(meta)
+    || node.autocomplete === 'one-time-code'
+    || (mode === 'numeric' && Number(node.maxLength || 0) <= 8);
+});
+const textInputs = described.filter(({ type }) => ['text', ''].includes(type));
+const bodyText = String(document.body && (document.body.innerText || document.body.textContent) || '')
+  .replace(/\s+/g, ' ').trim().toLowerCase();
+const headingMatch = /complete your sign ?up|complete sign ?up|完成.*注册|创建.*账户/.test(bodyText.slice(0, 1200));
+const profileForm = !!password && (
+  (!!given && !!family)
+  || (headingMatch && textInputs.filter(({ node }) => node !== password?.node).length >= 2)
+);
+return {
+  profile_form: profileForm,
+  profile_heading: headingMatch,
+  code_form: !!code,
+  url: location.href,
+  inputs: described.slice(0, 8).map(({ type, meta }) => `${type}/${meta}`),
+};
             """
-            )
         )
+        return result if isinstance(result, dict) else {}
     except Exception:
-        return False
+        return {}
+
+
+def _wait_profile_page_after_code(wait=8.0, cancel_callback=None):
+    """验证码提交后轮询页面元素，确认资料页已经真实出现。"""
+    deadline = time.time() + max(float(wait or 0), 0.4)
+    last_snapshot = {}
+    while time.time() < deadline:
+        raise_if_cancelled(cancel_callback)
+        last_snapshot = _profile_page_snapshot()
+        if last_snapshot.get("profile_form"):
+            return last_snapshot
+        sleep_with_cancel(0.4, cancel_callback)
+    return last_snapshot
 
 
 def detect_email_domain_rejection(email=""):
@@ -991,9 +1057,17 @@ return false;
         raise Exception("获取验证码失败")
     clean_code = str(code).replace("-", "").strip()
     deadline = time.time() + timeout
+    last_transition_log_at = 0.0
 
     while time.time() < deadline:
         raise_if_cancelled(cancel_callback)
+        page_snapshot = _profile_page_snapshot()
+        if page_snapshot.get("profile_form"):
+            if log_callback:
+                log_callback(
+                    f"[*] 已通过页面元素识别资料填写页: {page_snapshot.get('url', '')}"
+                )
+            return code
         native_filled = _native_fill_code(clean_code)
         if native_filled != "not-ready" and native_filled != "boxes-failed":
             filled = native_filled
@@ -1104,12 +1178,28 @@ return 'clicked';
                 """
             )
 
-        if native_clicked or clicked in ("clicked", "no-button"):
-            if log_callback:
-                click_detail = f" ({native_clicked})" if native_clicked else ""
-                log_callback(f"[*] 已填写验证码并提交: {code}{click_detail}")
-            sleep_with_cancel(1.5, cancel_callback)
-            return code
+        click_triggered = bool(native_clicked) or clicked == "clicked"
+        if click_triggered or clicked == "no-button":
+            transition = _wait_profile_page_after_code(
+                wait=8.0,
+                cancel_callback=cancel_callback,
+            )
+            if transition.get("profile_form"):
+                if log_callback:
+                    click_detail = f" ({native_clicked})" if native_clicked else ""
+                    log_callback(
+                        f"[*] 已填写验证码并提交，页面元素确认进入资料页: {code}{click_detail}"
+                    )
+                return code
+            now = time.time()
+            if log_callback and now - last_transition_log_at >= 5:
+                last_transition_log_at = now
+                inputs = " | ".join(str(x) for x in transition.get("inputs", []))
+                log_callback(
+                    "[Debug] 验证码提交后尚未识别到资料页，继续检测: "
+                    f"url={transition.get('url', '')}; code_form={transition.get('code_form', False)}; "
+                    f"inputs={inputs or 'none'}"
+                )
 
         sleep_with_cancel(0.5, cancel_callback)
 
