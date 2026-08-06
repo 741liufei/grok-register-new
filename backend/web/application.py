@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .account_exports import build_account_auth_archive
+from .account_exports import build_account_auth_archive, build_sso_archive, read_sso_token
 from .jobs import job_coordinator
 from .relogin_jobs import relogin_coordinator
 from backend.shared.paths import DATA_ROOT, PROJECT_ROOT, STATIC_ROOT
@@ -392,6 +392,11 @@ def _serialize_record(record: Dict[str, Any]) -> Dict[str, Any]:
             item[f"{kind}_auth_available"] = True
         except (FileNotFoundError, OSError, ValueError):
             item[f"{kind}_auth_available"] = False
+    try:
+        _find_account_sso_file(item)
+        item["sso_available"] = True
+    except (FileNotFoundError, OSError, ValueError):
+        item["sso_available"] = False
     item["screenshot_url"] = (
         f"/api/accounts/{item.get('id')}/failure-screenshot"
         if str(item.get("screenshot_path") or "").strip()
@@ -520,6 +525,26 @@ def _load_account_auth_json(record: Dict[str, Any], raw_config: Dict[str, Any], 
     return {"kind": kind, "path": str(path), "content": content}
 
 
+def _find_account_sso_file(record: Dict[str, Any]) -> Path:
+    email = str(record.get("email") or "").strip()
+    direct = str(record.get("account_file") or "").strip()
+    candidates = [Path(direct).expanduser()] if direct else []
+    if email:
+        safe_email = email.replace("/", "_").replace("\\", "_")
+        candidates.append(DATA_DIR / "accounts" / f"{safe_email}.txt")
+    root = DATA_DIR / "accounts"
+    for candidate in candidates:
+        path = candidate if candidate.is_absolute() else APP_DIR / candidate
+        if _path_within(path, [root]) and path.is_file():
+            return path.resolve()
+    raise FileNotFoundError("未找到该账号对应的 SSO 文件")
+
+
+def _load_account_sso(record: Dict[str, Any]) -> Dict[str, Any]:
+    path = _find_account_sso_file(record)
+    return {"kind": "sso", "path": str(path), "content": read_sso_token(path)}
+
+
 def _stream_file(path: Path, chunk_size: int = 65536) -> Iterator[bytes]:
     """按固定块读取文件，让响应在首块就绪后立即进入浏览器下载队列。"""
     with path.open("rb") as handle:
@@ -546,6 +571,21 @@ def _failure_screenshot_file(record: Dict[str, Any]) -> tuple[Path, str]:
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
     }
+    media_type = media_types.get(path.suffix.lower())
+    if not media_type:
+        raise ValueError("失败截图格式不受支持")
+    return path.resolve(), media_type
+
+
+def _relogin_screenshot_file(account_id: int, filename: str) -> tuple[Path, str]:
+    """读取带时间戳的重登截图，URL 始终指向该次失败现场。"""
+    name = str(filename or "").strip()
+    if not name or Path(name).name != name or not name.startswith(f"relogin-{int(account_id)}-"):
+        raise FileNotFoundError("重登失败截图不存在")
+    path = DATA_DIR / "screenshots" / "relogin-failures" / name
+    if not _path_within(path, [DATA_DIR / "screenshots" / "relogin-failures"]) or not path.is_file():
+        raise FileNotFoundError("重登失败截图不存在")
+    media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
     media_type = media_types.get(path.suffix.lower())
     if not media_type:
         raise ValueError("失败截图格式不受支持")
@@ -705,6 +745,7 @@ def create_app() -> FastAPI:
         email_disable_status: str = Query(""),
         q: str = Query(""),
         keyword: str = Query(""),
+        batch_id: str = Query(""),
         limit: int = Query(20, ge=1, le=10000),
         offset: int = Query(0, ge=0),
     ) -> Dict[str, Any]:
@@ -712,10 +753,12 @@ def create_app() -> FastAPI:
         store = gr.get_registration_repository()
         status_norm = str(status or "").strip().lower()
         keyword_norm = str(q or keyword or "").strip()
+        batch_norm = str(batch_id or "").strip()
         rows = store.list_results(
             status=status_norm,
             email_disable_status=str(email_disable_status or "").strip().lower(),
             keyword=keyword_norm,
+            batch_id=batch_norm,
             limit=limit,
             offset=offset,
         )
@@ -723,6 +766,7 @@ def create_app() -> FastAPI:
             status=status_norm,
             email_disable_status=str(email_disable_status or "").strip().lower(),
             keyword=keyword_norm,
+            batch_id=batch_norm,
         )
         return {
             "ok": True,
@@ -755,20 +799,23 @@ def create_app() -> FastAPI:
     @app.post("/api/accounts/auth-json/{kind}/download")
     def api_accounts_auth_json_download(kind: str, body: AccountIdsBody) -> StreamingResponse:
         normalized_kind = str(kind or "").strip().lower()
-        if normalized_kind not in {"cpa", "grok2api"}:
-            raise HTTPException(status_code=400, detail="kind 必须是 cpa 或 grok2api")
+        if normalized_kind not in {"cpa", "grok2api", "sso"}:
+            raise HTTPException(status_code=400, detail="kind 必须是 cpa、grok2api 或 sso")
         ids = _batch_account_ids(body.ids)
         gr = _gr()
         gr.load_config()
         records = gr.get_registration_repository().get_results_by_ids(ids)
         if not records:
             raise HTTPException(status_code=404, detail="没有匹配的记录")
-        archive, exported, skipped = build_account_auth_archive(
-            records, gr.config, normalized_kind, _find_account_auth_file
-        )
+        if normalized_kind == "sso":
+            archive, exported, skipped = build_sso_archive(records, _find_account_sso_file)
+        else:
+            archive, exported, skipped = build_account_auth_archive(
+                records, gr.config, normalized_kind, _find_account_auth_file
+            )
         if not exported:
-            label = "CPA" if normalized_kind == "cpa" else "Grok2API"
-            raise HTTPException(status_code=404, detail=f"所选账号均没有可导出的 {label} JSON")
+            label = {"cpa": "CPA JSON", "grok2api": "Grok2API JSON", "sso": "SSO"}[normalized_kind]
+            raise HTTPException(status_code=404, detail=f"所选账号均没有可导出的 {label}")
         filename = f"{normalized_kind}-auth-{time.strftime('%Y%m%d-%H%M%S')}.zip"
         return StreamingResponse(
             iter([archive]),
@@ -871,18 +918,28 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FileResponse(path, media_type=media_type, content_disposition_type="inline")
 
+    @app.get("/api/accounts/{account_id}/relogin-screenshots/{filename}")
+    def api_account_relogin_screenshot(account_id: int, filename: str) -> FileResponse:
+        try:
+            path, media_type = _relogin_screenshot_file(account_id, filename)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(path, media_type=media_type, content_disposition_type="inline")
+
     @app.get("/api/accounts/{account_id}/auth-json/{kind}")
     def api_account_auth_json(account_id: int, kind: str) -> Dict[str, Any]:
         normalized_kind = str(kind or "").strip().lower()
-        if normalized_kind not in {"cpa", "grok2api"}:
-            raise HTTPException(status_code=400, detail="kind 必须是 cpa 或 grok2api")
+        if normalized_kind not in {"cpa", "grok2api", "sso"}:
+            raise HTTPException(status_code=400, detail="kind 必须是 cpa、grok2api 或 sso")
         gr = _gr()
         gr.load_config()
         rows = gr.get_registration_repository().get_results_by_ids([account_id])
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
         try:
-            payload = _load_account_auth_json(rows[0], gr.config, normalized_kind)
+            payload = _load_account_sso(rows[0]) if normalized_kind == "sso" else _load_account_auth_json(rows[0], gr.config, normalized_kind)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
@@ -892,14 +949,29 @@ def create_app() -> FastAPI:
     @app.get("/api/accounts/{account_id}/auth-json/{kind}/download")
     def api_account_auth_json_download(account_id: int, kind: str) -> StreamingResponse:
         normalized_kind = str(kind or "").strip().lower()
-        if normalized_kind not in {"cpa", "grok2api"}:
-            raise HTTPException(status_code=400, detail="kind 必须是 cpa 或 grok2api")
+        if normalized_kind not in {"cpa", "grok2api", "sso"}:
+            raise HTTPException(status_code=400, detail="kind 必须是 cpa、grok2api 或 sso")
         gr = _gr()
         gr.load_config()
         rows = gr.get_registration_repository().get_results_by_ids([account_id])
         if not rows:
             raise HTTPException(status_code=404, detail="记录不存在")
         try:
+            if normalized_kind == "sso":
+                payload = _load_account_sso(rows[0])
+                token_bytes = f"{payload['content']}\n".encode("utf-8")
+                email = str(rows[0].get("email") or account_id)
+                safe_email = "".join(char if char.isalnum() or char in ".@_-" else "_" for char in email)
+                return StreamingResponse(
+                    iter([token_bytes]),
+                    media_type="text/plain; charset=utf-8",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{safe_email}.sso.txt"',
+                        "Content-Length": str(len(token_bytes)),
+                        "Cache-Control": "no-cache",
+                        "X-Content-Type-Options": "nosniff",
+                    },
+                )
             path = _find_account_auth_file(rows[0], gr.config, normalized_kind)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

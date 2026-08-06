@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Braces,
   Bug,
@@ -10,6 +11,7 @@ import {
   Database,
   Download,
   Eye,
+  History,
   Loader2,
   LogIn,
   Mail,
@@ -23,7 +25,8 @@ import {
 } from "lucide-react";
 import { AccountBatchActions } from "@/components/AccountBatchActions";
 import { api, type AccountRecord, type ReloginStatus } from "@/lib/api";
-import { copyText, formatDuration, maskSecret } from "@/lib/utils";
+import { appendReloginHistory } from "@/lib/reloginHistory";
+import { cn, copyText, formatDuration, maskSecret } from "@/lib/utils";
 import {
   Badge,
   Button,
@@ -252,7 +255,7 @@ function AccountDetails({
 
   return (
     <div className="space-y-4 text-sm">
-      <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
+      <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
         <div className="break-all font-medium text-foreground">{detail.email || "未记录邮箱"}</div>
         <div className="mt-2 flex flex-wrap gap-2">
           <Badge variant={statusVariant(detail.status)}>{detail.status || "unknown"}</Badge>
@@ -344,9 +347,9 @@ function AccountDetails({
         </section>
       ) : null}
 
-      <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-3">
+      <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
         <div className="flex items-start gap-2">
-          <Braces className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" aria-hidden="true" />
+          <Braces className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" aria-hidden="true" />
           <div>
             <div className="text-sm font-medium text-foreground">授权 JSON</div>
             <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
@@ -441,10 +444,15 @@ function AccountDetails({
 }
 
 export function AccountsPage() {
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get("status") || "";
+  const initialKeyword = searchParams.get("q") || "";
+  const initialBatchId = searchParams.get("batch_id") || "";
   const [items, setItems] = useState<AccountRecord[]>([]);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus);
   const [emailDisableStatus, setEmailDisableStatus] = useState("");
-  const [keyword, setKeyword] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [batchIdFilter] = useState(initialBatchId);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<AccountRecord | null>(null);
@@ -456,7 +464,11 @@ export function AccountsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
   const [reloginPolling, setReloginPolling] = useState(true);
-  const [reloginFailure, setReloginFailure] = useState<{ email: string; error: string } | null>(null);
+  const [reloginReport, setReloginReport] = useState<ReloginStatus | null>(null);
+  // 已上报过的 run_id，挡住重复弹窗；挂载时看到的陈旧任务只登记基线、不展示。
+  const reportedRunIdRef = useRef("");
+  // 本次是否真的观察到运行中。用 ref 而非闭包变量：StrictMode 下 effect 会重建。
+  const sawRunningRef = useRef(false);
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
   const [batchBusy, setBatchBusy] = useState<"" | "export-cpa" | "export-grok2api" | "relogin">("");
   const [deleteDialog, setDeleteDialog] = useState<{ ids: number[]; email: string } | null>(null);
@@ -495,6 +507,7 @@ export function AccountsPage() {
         status,
         emailDisableStatus,
         q: keyword,
+        batchId: batchIdFilter || undefined,
         limit: targetPageSize,
         offset: (targetPage - 1) * targetPageSize,
       });
@@ -533,36 +546,40 @@ export function AccountsPage() {
   };
 
   useEffect(() => {
-    void load(1, 20);
+    void load(1, pageSize);
+    // 仅挂载时读取 URL 初始筛选并加载一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!reloginPolling) return;
     let active = true;
     let timer: number | undefined;
-    let lastRunning = !!relogin?.running;
     const check = async () => {
       try {
         const result = await api.reloginStatus();
         if (!active) return;
         const next = result.relogin;
         setRelogin(next);
-        if (!next.running) {
-          if (lastRunning) await load();
-          if (next.error) {
-            setReloginFailure({
-              email: next.total_count > 1 ? "" : next.email,
-              error: next.error,
-            });
-          } else if (lastRunning) {
-            showToast("重新登录完成，授权文件已刷新", "success");
-          }
-          setReloginPolling(false);
+        if (next.running) {
+          sawRunningRef.current = true;
+          timer = window.setTimeout(check, 2000);
           return;
         }
-        lastRunning = next.running;
-        if (next.running) timer = window.setTimeout(check, 2000);
-        else setReloginPolling(false);
+        const runId = next.run_id || "";
+        // 将完成结果写入独立历史页；当前页面只保留轻量状态提示。
+        if (runId && reportedRunIdRef.current !== runId) {
+          await appendReloginHistory(next);
+          if (!active) return;
+          if (sawRunningRef.current) {
+            await load();
+            if (!active) return;
+            setReloginReport(next);
+          }
+        }
+        reportedRunIdRef.current = runId;
+        sawRunningRef.current = false;
+        setReloginPolling(false);
       } catch {
         if (active) timer = window.setTimeout(check, 5000);
       }
@@ -677,6 +694,26 @@ export function AccountsPage() {
     }
   };
 
+  // 启动后的共用记账：作废旧报告；若任务已在返回前跑完（窄缝），直接出报告。
+  const afterReloginStart = async (next: ReloginStatus) => {
+    setRelogin(next);
+    setReloginReport(null);
+    if (next.running) {
+      sawRunningRef.current = true;
+      setReloginPolling(true);
+      return;
+    }
+    reportedRunIdRef.current = next.run_id || "";
+    sawRunningRef.current = false;
+    setReloginPolling(false);
+    if (next.run_id) {
+      setReloginReport(next);
+      setReportOpen(true);
+      await appendReloginHistory(next);
+    }
+    await load();
+  };
+
   const onBatchRelogin = async () => {
     if (!selectedIds.length) return;
     if (!window.confirm(`按顺序重新登录选中的 ${selectedIds.length} 个账号并刷新授权文件？`)) return;
@@ -684,9 +721,7 @@ export function AccountsPage() {
     setBatchBusy("relogin");
     try {
       const result = await api.startBatchRelogin(selectedIds);
-      setRelogin(result.relogin);
-      setReloginFailure(null);
-      setReloginPolling(!!result.relogin.running);
+      await afterReloginStart(result.relogin);
       showToast("已启动批量重新登录", "success");
     } catch (err: any) {
       showToast(err.message || "启动批量重新登录失败", "error");
@@ -747,9 +782,7 @@ export function AccountsPage() {
     if (!window.confirm(`使用已保存的账号密码重新登录 ${item.email}，刷新 SSO 和授权文件？`)) return;
     try {
       const result = await api.startRelogin(item.id);
-      setRelogin(result.relogin);
-      setReloginFailure(null);
-      setReloginPolling(!!result.relogin.running);
+      await afterReloginStart(result.relogin);
       showToast("已启动重新登录，请稍候", "success");
     } catch (err: any) {
       showToast(err.message || "启动重新登录失败", "error");
@@ -893,6 +926,14 @@ export function AccountsPage() {
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
               刷新
             </Button>
+            <Link to="/accounts/relogin/history" className={buttonVariants({ variant: "outline" })}>
+              <History className="h-4 w-4" aria-hidden="true" />
+              登录历史
+            </Link>
+            <Link to="/accounts/relogin" className={buttonVariants({ variant: "outline" })}>
+              <LogIn className="h-4 w-4" aria-hidden="true" />
+              重登中心
+            </Link>
             <AccountBatchActions
               selectedCount={selectedIds.length}
               busy={!!batchBusy}
@@ -912,32 +953,51 @@ export function AccountsPage() {
       />
 
       {relogin?.running ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           <span className="font-medium">
             {relogin.total_count > 1
               ? `批量重新登录 ${Math.min(relogin.completed_count + 1, relogin.total_count)}/${relogin.total_count}`
               : `正在重新登录 ${relogin.email}`}
           </span>
-          {relogin.total_count > 1 ? <span className="text-blue-700">{relogin.email}</span> : null}
-          <span className="text-blue-700">{relogin.stage}</span>
+          {relogin.total_count > 1 ? <span className="text-sky-600">{relogin.email}</span> : null}
+          <span className="text-sky-600">{relogin.stage}</span>
         </div>
       ) : null}
 
-      {reloginFailure ? (
-        <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-          <div className="min-w-0">
-            <div className="font-medium">重新登录失败</div>
-            <div className="mt-1 break-all text-red-700">
-              {reloginFailure.email ? `${reloginFailure.email}：` : ""}{reloginFailure.error}
-            </div>
+      {reloginReport ? (
+        <div
+          role="status"
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm",
+            reloginReport.failed_count
+              ? "border-red-200 bg-red-50 text-red-900"
+              : "border-emerald-200 bg-emerald-50 text-emerald-900"
+          )}
+        >
+          <span className="min-w-0 font-medium">
+            上次重新登录：成功 {reloginReport.success_count}，失败 {reloginReport.failed_count}
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <Link to={`/accounts/relogin/history/${reloginReport.run_id}`} className={buttonVariants({ variant: "ghost", size: "sm" })}>查看报告</Link>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setReloginReport(null)}
+              aria-label="关闭重新登录结果"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
-          <Button size="icon" variant="ghost" className="shrink-0" onClick={() => setReloginFailure(null)} aria-label="关闭重新登录失败提醒">
-            <X className="h-4 w-4" aria-hidden="true" />
-          </Button>
         </div>
       ) : null}
 
+      {batchIdFilter ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          当前按批次筛选：<span className="font-mono text-xs sm:text-sm">{batchIdFilter}</span>
+          <Link to="/accounts" className="ml-3 text-sky-700 underline-offset-2 hover:underline">清除</Link>
+        </div>
+      ) : null}
       <Card>
         <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[160px_190px_minmax(0,1fr)_auto]">
           <Select
@@ -1087,9 +1147,9 @@ export function AccountsPage() {
                   ))}
                 </div>
 
-                <div className="hidden max-h-[720px] overflow-auto bg-slate-50/70 p-2 xl:block">
-                  <table className="w-full min-w-[1040px] border-separate text-left text-sm [border-spacing:0_6px]">
-                    <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                <div className="hidden max-h-[720px] overflow-auto bg-white xl:block">
+                  <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
+                    <thead className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50/95 backdrop-blur">
                       <tr className="text-xs font-medium text-muted-foreground">
                         <th className="w-12 px-4 py-2">
                           <input
@@ -1116,7 +1176,7 @@ export function AccountsPage() {
                           key={item.id}
                           className="group"
                         >
-                          <td className={`rounded-l-xl border-y border-l px-4 py-2.5 transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-4 py-3 transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <input
                               type="checkbox"
                               checked={!!selected[item.id]}
@@ -1126,9 +1186,9 @@ export function AccountsPage() {
                               aria-label={`选择 ${item.email}`}
                             />
                           </td>
-                          <td className={`max-w-[270px] border-y px-3 py-2.5 transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`max-w-[270px] border-b border-slate-100 px-3 py-3 transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <div className="flex min-w-0 items-center gap-2.5">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-primary ring-1 ring-blue-100">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600 ring-1 ring-sky-100">
                                 <Mail className="h-4 w-4" aria-hidden="true" />
                               </span>
                               <div className="min-w-0">
@@ -1137,25 +1197,25 @@ export function AccountsPage() {
                               </div>
                             </div>
                           </td>
-                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-2 py-3 text-center transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <CompactStatusBadge status={item.status} label={statusLabel(item.status)} />
                           </td>
-                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-2 py-3 text-center transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <CompactStatusBadge status={item.cpa_status} label={authStatusLabel(item.cpa_status)} />
                           </td>
-                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-2 py-3 text-center transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <CompactStatusBadge
                               status={item.cpa_remote_status}
                               label={importStatusLabel(item.cpa_remote_status)}
                             />
                           </td>
-                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-2 py-3 text-center transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <CompactStatusBadge
                               status={item.grok2api_remote_status}
                               label={importStatusLabel(item.grok2api_remote_status)}
                             />
                           </td>
-                          <td className={`border-y px-2 py-2.5 text-center transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-2 py-3 text-center transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <Badge
                               variant={emailDisableVariant(item.email_disable_status)}
                               className="min-h-6 min-w-[62px] justify-center whitespace-nowrap rounded-md px-2 py-0 text-[11px] shadow-none"
@@ -1171,11 +1231,11 @@ export function AccountsPage() {
                               </div>
                             ) : null}
                           </td>
-                          <td className={`border-y px-3 py-2.5 text-muted-foreground transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-3 py-3 text-muted-foreground transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">{item.provider || "-"}</span>
                           </td>
-                          <td className={`border-y px-3 py-2.5 tabular-nums text-muted-foreground transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>{formatDuration(item.duration_seconds)}</td>
-                          <td className={`sticky right-0 z-[5] rounded-r-xl border-y border-r px-3 py-2.5 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.45)] transition-colors ${detail?.id === item.id ? "border-blue-200 bg-blue-50" : "bg-card group-hover:bg-blue-50/60"}`}>
+                          <td className={`border-b border-slate-100 px-3 py-3 tabular-nums text-muted-foreground transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>{formatDuration(item.duration_seconds)}</td>
+                          <td className={`sticky right-0 z-[5] border-b border-slate-100 px-3 py-3 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.3)] transition-colors ${detail?.id === item.id ? "bg-sky-50" : "bg-white group-hover:bg-slate-50"}`}>
                             <div className="flex items-center justify-center gap-1.5">
                               <Button size="sm" variant="outline" onClick={() => setDetail(item)}>
                                 查看
@@ -1385,7 +1445,7 @@ export function AccountsPage() {
 
               <button
                 type="button"
-                className="flex min-h-20 w-full items-start gap-3 rounded-2xl border bg-card p-4 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex min-h-20 w-full items-start gap-3 rounded-2xl border bg-card p-4 text-left transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => void executeDelete(false)}
                 disabled={!!deleteBusy}
               >

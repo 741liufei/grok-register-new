@@ -34,6 +34,7 @@ class RegistrationJobCoordinator:
         self._failure_count = 0
         self._current_stage = "等待启动"
         self._current_email = ""
+        self._batch_id = ""
 
     def _update_progress_from_log(self, message: str) -> None:
         text = str(message or "").strip()
@@ -131,6 +132,7 @@ class RegistrationJobCoordinator:
                 ),
                 "current_stage": self._current_stage,
                 "current_email": self._current_email,
+                "batch_id": self._batch_id,
             }
 
     def get_logs(self, after_id: int = 0, limit: int = 500) -> List[Dict[str, Any]]:
@@ -169,6 +171,7 @@ class RegistrationJobCoordinator:
             self._failure_count = 0
             self._current_stage = "任务启动中"
             self._current_email = ""
+            self._batch_id = ""
             self._append_log(f"[*] Web 任务启动：数量={count} 并发={workers}")
 
         manager = self
@@ -216,7 +219,20 @@ class RegistrationJobCoordinator:
                 gr.registration_log = web_registration_log
                 gr.RegistrationStopController = WebStopController
 
-                gr.run_registration(count_local)
+                original_new_batch_id = gr.new_registration_batch_id
+
+                def capture_batch_id(source="web"):
+                    batch_id = original_new_batch_id(source)
+                    with manager._lock:
+                        manager._batch_id = str(batch_id or "")
+                    manager._append_log(f"[*] 任务批次: {batch_id}")
+                    return batch_id
+
+                gr.new_registration_batch_id = capture_batch_id
+                try:
+                    gr.run_registration(count_local)
+                finally:
+                    gr.new_registration_batch_id = original_new_batch_id
             except Exception as exc:
                 with manager._lock:
                     manager._last_error = str(exc)

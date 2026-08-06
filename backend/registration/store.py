@@ -267,6 +267,7 @@ class RegistrationRepository:
         status: str = "",
         email_disable_status: str = "",
         keyword: str = "",
+        batch_id: str = "",
     ) -> Tuple[str, List[Any]]:
         clauses = []
         params: List[Any] = []
@@ -278,6 +279,10 @@ class RegistrationRepository:
         if normalized_disable_status:
             clauses.append("email_disable_status = ?")
             params.append(normalized_disable_status)
+        normalized_batch_id = str(batch_id or "").strip()
+        if normalized_batch_id:
+            clauses.append("batch_id = ?")
+            params.append(normalized_batch_id)
         normalized_keyword = str(keyword or "").strip()
         if normalized_keyword:
             like = f"%{normalized_keyword}%"
@@ -295,6 +300,7 @@ class RegistrationRepository:
         status: str = "",
         email_disable_status: str = "",
         keyword: str = "",
+        batch_id: str = "",
         limit: int = 2000,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -302,6 +308,7 @@ class RegistrationRepository:
             status=status,
             email_disable_status=email_disable_status,
             keyword=keyword,
+            batch_id=batch_id,
         )
         safe_limit = max(1, min(int(limit or 2000), 10000))
         safe_offset = max(0, int(offset or 0))
@@ -325,12 +332,14 @@ class RegistrationRepository:
         status: str = "",
         email_disable_status: str = "",
         keyword: str = "",
+        batch_id: str = "",
     ) -> int:
         """返回与账号列表相同筛选条件下的记录总数。"""
         where, params = self._result_filters(
             status=status,
             email_disable_status=email_disable_status,
             keyword=keyword,
+            batch_id=batch_id,
         )
         with self._connect() as conn:
             row = conn.execute(
@@ -378,6 +387,7 @@ class RegistrationRepository:
         status: str = "success",
         error: str = "",
         screenshot_path: str = "",
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """记录重新登录结果，并在成功时刷新授权文件路径。"""
         try:
@@ -409,6 +419,8 @@ class RegistrationRepository:
                     "relogin_error": str(error or ""),
                 }
             )
+            if diagnostics:
+                extra["relogin_diagnostics"] = dict(diagnostics)
             values: Dict[str, Any] = {
                 "extra_json": json.dumps(extra, ensure_ascii=False, sort_keys=True),
                 "id": normalized_id,

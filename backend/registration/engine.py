@@ -902,7 +902,7 @@ def _append_sso_risk_rejected(email: str, sso: str, details: str, log_callback=N
 
 
 def ensure_sso_oauth_eligible(raw_token, email="", log_callback=None) -> dict:
-    """检查新账号是否被注册风控拒绝；无法判定时继续原有 OAuth 路径。"""
+    """复查新账号风控状态；无法稳定判定时不进入 OAuth。"""
     if not config.get("cpa_auto_add", False):
         return {}
     if not any(
@@ -918,22 +918,50 @@ def ensure_sso_oauth_eligible(raw_token, email="", log_callback=None) -> dict:
         if log_callback:
             log_callback(f"[CPA] {str(message).strip()}")
 
-    _risk_log("检查新账号注册风控状态 ...")
-    state = _s2cpa.inspect_sso_account_state(
-        sso,
-        proxy=_resolve_cpa_proxy(),
-        log=_risk_log,
-    )
-    if state.get("denied"):
-        details = str(state.get("bot_flag_details") or "policy=deny,event=$registration")
-        _append_sso_risk_rejected(email, sso, details, log_callback=log_callback)
-        raise RegistrationRiskDenied(
-            "注册风控拒绝，已跳过 OAuth: "
-            f"botFlagSource={state.get('bot_flag_source')} {details}"
+    retry_delays = (0, 2, 4, 8)
+    proxy = _resolve_cpa_proxy()
+    last_state = {}
+
+    for attempt, delay in enumerate(retry_delays, start=1):
+        if delay:
+            _risk_log(f"风控字段尚未稳定，{delay}s 后进行第 {attempt} 次检查")
+            time.sleep(delay)
+        _risk_log(f"检查新账号注册风控状态 ({attempt}/{len(retry_delays)}) ...")
+        state = _s2cpa.inspect_sso_account_state(
+            sso,
+            proxy=proxy,
+            log=_risk_log,
         )
-    if not state.get("found"):
-        _risk_log(f"未读取到注册风控字段，继续 OAuth: {state.get('error') or 'unknown'}")
-    return state
+        last_state = state
+        source = state.get("bot_flag_source")
+        source_flagged = source not in (None, 0, "0", "")
+        if state.get("denied") or source_flagged:
+            details = str(
+                state.get("bot_flag_details")
+                or f"botFlagSource={source},policy=unknown,event=unknown"
+            )
+            _append_sso_risk_rejected(email, sso, details, log_callback=log_callback)
+            raise RegistrationRiskDenied(
+                "注册风控拒绝，已跳过 OAuth: "
+                f"botFlagSource={source} {details}"
+            )
+
+        # 明确读取到非风险状态后即可继续；字段为 null 时继续短时复查，避免注册结果延迟写入。
+        if state.get("found") and (
+            source == 0
+            or str(state.get("policy") or "").lower() in {"allow", "review"}
+            or bool(state.get("bot_flag_details"))
+        ):
+            return state
+
+        _risk_log(
+            "本次未得到稳定风控结论: "
+            f"{state.get('error') or 'botFlag 字段为空'}"
+        )
+
+    reason = str(last_state.get("error") or "botFlag 字段持续为空")
+    _risk_log(f"注册风控状态无法确认，继续 OAuth: {reason}")
+    return last_state
 
 
 def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> bool:
