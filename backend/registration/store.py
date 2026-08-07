@@ -183,6 +183,37 @@ class RegistrationRepository:
             )
             conn.execute("PRAGMA user_version = 4")
 
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS registration_job_snapshot (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    batch_id TEXT NOT NULL DEFAULT '',
+                    running INTEGER NOT NULL DEFAULT 0,
+                    started_at REAL,
+                    finished_at REAL,
+                    target_count INTEGER NOT NULL DEFAULT 0,
+                    workers INTEGER NOT NULL DEFAULT 1,
+                    source TEXT NOT NULL DEFAULT 'web',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    completed_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    current_stage TEXT NOT NULL DEFAULT '',
+                    current_email TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            # 单行快照：没有则插入空行
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO registration_job_snapshot (id, updated_at)
+                VALUES (1, ?)
+                """,
+                (self.now_text(),),
+            )
+            conn.execute("PRAGMA user_version = 5")
+
     def add_result(self, record: Dict[str, Any]) -> int:
         now = self.now_text()
         status = str(record.get("status") or "failure").strip().lower()
@@ -624,3 +655,80 @@ class RegistrationRepository:
                 except (OSError, sqlite3.IntegrityError, ValueError):
                     continue
         return imported
+
+    def get_job_snapshot(self) -> Dict[str, Any]:
+        """读取最近一次 Web 注册任务快照（单行）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM registration_job_snapshot WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return {}
+        data = dict(row)
+        data["running"] = bool(data.get("running"))
+        return data
+
+    def save_job_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        """持久化最近一次 Web 注册任务快照，供服务重启后恢复批次与进度摘要。"""
+        now = self.now_text()
+        payload = {
+            "batch_id": str(snapshot.get("batch_id") or ""),
+            "running": 1 if snapshot.get("running") else 0,
+            "started_at": snapshot.get("started_at"),
+            "finished_at": snapshot.get("finished_at"),
+            "target_count": int(snapshot.get("target_count") or 0),
+            "workers": int(snapshot.get("workers") or 1),
+            "source": str(snapshot.get("source") or "web"),
+            "last_error": str(snapshot.get("last_error") or ""),
+            "completed_count": int(snapshot.get("completed_count") or 0),
+            "success_count": int(snapshot.get("success_count") or 0),
+            "failure_count": int(snapshot.get("failure_count") or 0),
+            "current_stage": str(snapshot.get("current_stage") or ""),
+            "current_email": str(snapshot.get("current_email") or ""),
+            "updated_at": now,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO registration_job_snapshot (
+                    id, batch_id, running, started_at, finished_at, target_count, workers,
+                    source, last_error, completed_count, success_count, failure_count,
+                    current_stage, current_email, updated_at
+                ) VALUES (
+                    1, :batch_id, :running, :started_at, :finished_at, :target_count, :workers,
+                    :source, :last_error, :completed_count, :success_count, :failure_count,
+                    :current_stage, :current_email, :updated_at
+                )
+                ON CONFLICT(id) DO UPDATE SET
+                    batch_id = excluded.batch_id,
+                    running = excluded.running,
+                    started_at = excluded.started_at,
+                    finished_at = excluded.finished_at,
+                    target_count = excluded.target_count,
+                    workers = excluded.workers,
+                    source = excluded.source,
+                    last_error = excluded.last_error,
+                    completed_count = excluded.completed_count,
+                    success_count = excluded.success_count,
+                    failure_count = excluded.failure_count,
+                    current_stage = excluded.current_stage,
+                    current_email = excluded.current_email,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+
+    def latest_web_batch_id(self) -> str:
+        """回退：从结果表推断最近一个非空 web 批次号。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT batch_id
+                FROM registration_results
+                WHERE batch_id IS NOT NULL AND trim(batch_id) != ''
+                  AND batch_id NOT IN ('legacy-import')
+                ORDER BY finished_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return str(row["batch_id"] if row else "") or ""

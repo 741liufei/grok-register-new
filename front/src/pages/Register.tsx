@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import {
   ArrowDownToLine,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleOff,
   Clock3,
   Copy,
@@ -103,6 +105,7 @@ export function RegisterPage({ view = "new" }: { view?: "new" | "runtime" }) {
   const [runResultsTotal, setRunResultsTotal] = useState(0);
   const [resultDetail, setResultDetail] = useState<AccountRecord | null>(null);
   const [resultTab, setResultTab] = useState<"all" | "success" | "failure">("all");
+  const [resultsExpanded, setResultsExpanded] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({
     message: "",
   });
@@ -222,7 +225,7 @@ export function RegisterPage({ view = "new" }: { view?: "new" | "runtime" }) {
         const data = await api.accounts(
           batchId
             ? { batchId, limit: 100, offset: 0 }
-            : { limit: 12, offset: 0 }
+            : { limit: 20, offset: 0 }
         );
         if (cancelled) return;
         setRunResults(data.items || []);
@@ -663,11 +666,17 @@ export function RegisterPage({ view = "new" }: { view?: "new" | "runtime" }) {
       </Card>
 
       
-      {/* 本次结果短列表 */}
+      {/* 本次结果：默认折叠，标题显示成功/失败 */}
       {(() => {
+        const PREVIEW_LIMIT = 20;
         const batchId = String(job?.batch_id || "").trim();
         const successItems = runResults.filter((item) => item.status === "success" || item.success);
-        const failureItems = runResults.filter((item) => item.status === "failure" || (!item.success && item.status !== "success"));
+        const failureItems = runResults.filter(
+          (item) => item.status === "failure" || (!item.success && item.status !== "success")
+        );
+        const successCount = successItems.length;
+        const failureCount = failureItems.length;
+        const totalCount = runResultsTotal || runResults.length;
         const visible =
           resultTab === "success" ? successItems : resultTab === "failure" ? failureItems : runResults;
         const accountsQuery = (status?: string) => {
@@ -679,101 +688,147 @@ export function RegisterPage({ view = "new" }: { view?: "new" | "runtime" }) {
         };
         return (
           <Card className="overflow-hidden">
-            <CardHeader className="border-b border-slate-100">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <CardTitle>本次结果</CardTitle>
-                  <CardDescription>
-                    {batchId
-                      ? `当前批次 ${batchId} · 共 ${runResultsTotal || runResults.length} 条（本页仅展示最近 12 条）`
+            <button
+              type="button"
+              onClick={() => setResultsExpanded((value) => !value)}
+              className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50/80 sm:px-5"
+              aria-expanded={resultsExpanded}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                {resultsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-base font-semibold text-slate-950">本次结果</span>
+                  <Badge variant="success">成功 {successCount}</Badge>
+                  <Badge variant="destructive">失败 {failureCount}</Badge>
+                  <span className="text-xs tabular-nums text-slate-500">共 {totalCount} 条</span>
+                </span>
+                <span className="mt-1 block truncate text-xs text-slate-500">
+                  {resultsExpanded
+                    ? batchId
+                      ? `当前批次 ${batchId} · 展开后最多预览 ${PREVIEW_LIMIT} 条`
                       : job?.running
                         ? "批次号生成后将按本轮任务精确筛选"
-                        : "展示最近账号记录；启动任务后会绑定本轮批次"}
-                  </CardDescription>
+                        : "展开查看本页预览；完整列表请到账号页"
+                    : batchId
+                      ? `已折叠 · 批次 ${batchId}`
+                      : "已折叠 · 点击展开查看明细"}
+                </span>
+              </span>
+              <span className="shrink-0 text-xs font-medium text-slate-500">
+                {resultsExpanded ? "收起" : "展开"}
+              </span>
+            </button>
+
+            {resultsExpanded ? (
+              <>
+                <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        ["all", `全部 ${runResults.length}`],
+                        ["success", `成功 ${successCount}`],
+                        ["failure", `失败 ${failureCount}`],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setResultTab(id)}
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                          resultTab === id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      to={accountsQuery()}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex items-center gap-1.5")}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      全部账号
+                    </Link>
+                    <Link
+                      to={accountsQuery("success")}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex")}
+                    >
+                      成功筛选
+                    </Link>
+                    <Link
+                      to={accountsQuery("failure")}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex")}
+                    >
+                      失败筛选
+                    </Link>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link to={accountsQuery()} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex items-center gap-1.5")}>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    全部账号
-                  </Link>
-                  <Link to={accountsQuery("success")} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex")}>
-                    成功筛选
-                  </Link>
-                  <Link to={accountsQuery("failure")} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex")}>
-                    失败筛选
-                  </Link>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {(
-                  [
-                    ["all", `全部 ${runResults.length}`],
-                    ["success", `成功 ${successItems.length}`],
-                    ["failure", `失败 ${failureItems.length}`],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setResultTab(id)}
-                    className={cn(
-                      "rounded-full px-2.5 py-1 text-xs font-medium transition",
-                      resultTab === id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {visible.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-slate-500 sm:px-5">
-                  {job?.running ? "尚无落库结果，完成单个账号后会出现在这里。" : "暂无结果。可先去新建任务，或打开账号页查看历史。"}
-                </div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {visible.slice(0, 12).map((item) => {
-                    const ok = item.status === "success" || item.success;
-                    return (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          onClick={() => setResultDetail(item)}
-                          className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-slate-50 sm:px-5"
-                        >
-                          <span
-                            className={cn(
-                              "mt-0.5 inline-flex min-w-14 shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-medium",
-                              ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                            )}
-                          >
-                            {ok ? "成功" : item.status || "失败"}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-slate-900">{item.email || `记录 #${item.id}`}</span>
-                            <span className="mt-0.5 block truncate text-xs text-slate-500">
-                              {[item.provider, item.failure_type || item.failure_reason, item.finished_at]
-                                .filter(Boolean)
-                                .join(" · ") || "点击查看详情"}
-                            </span>
-                          </span>
-                          {item.screenshot_url ? <ImageIcon className="mt-1 h-4 w-4 shrink-0 text-slate-400" /> : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {visible.length > 12 || (runResultsTotal || 0) > visible.length || runResults.length > 12 ? (
-                <div className="border-t border-slate-100 px-4 py-3 text-center text-xs text-slate-500 sm:px-5">
-                  本页仅展示最近 12 条预览，完整批次请
-                  <Link to={accountsQuery(resultTab === "all" ? undefined : resultTab)} className="mx-1 text-sky-600 hover:underline">
-                    打开账号页
-                  </Link>
-                </div>
-              ) : null}
-            </CardContent>
+
+                <CardContent className="p-0">
+                  {visible.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-sm text-slate-500 sm:px-5">
+                      {job?.running
+                        ? "尚无落库结果，完成单个账号后会出现在这里。"
+                        : "暂无结果。可先去新建任务，或打开账号页查看历史。"}
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {visible.slice(0, PREVIEW_LIMIT).map((item) => {
+                        const ok = item.status === "success" || item.success;
+                        return (
+                          <li key={item.id}>
+                            <button
+                              type="button"
+                              onClick={() => setResultDetail(item)}
+                              className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-slate-50 sm:px-5"
+                            >
+                              <span
+                                className={cn(
+                                  "mt-0.5 inline-flex min-w-14 shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+                                  ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                                )}
+                              >
+                                {ok ? "成功" : item.status || "失败"}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-slate-900">
+                                  {item.email || `记录 #${item.id}`}
+                                </span>
+                                <span className="mt-0.5 block truncate text-xs text-slate-500">
+                                  {[item.provider, item.failure_type || item.failure_reason, item.finished_at]
+                                    .filter(Boolean)
+                                    .join(" · ") || "点击查看详情"}
+                                </span>
+                              </span>
+                              {item.screenshot_url ? (
+                                <ImageIcon className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                              ) : null}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {visible.length > PREVIEW_LIMIT ||
+                  (runResultsTotal || 0) > visible.length ||
+                  runResults.length > PREVIEW_LIMIT ? (
+                    <div className="border-t border-slate-100 px-4 py-3 text-center text-xs text-slate-500 sm:px-5">
+                      本页仅展示最近 {PREVIEW_LIMIT} 条预览，完整批次请
+                      <Link
+                        to={accountsQuery(resultTab === "all" ? undefined : resultTab)}
+                        className="mx-1 text-sky-600 hover:underline"
+                      >
+                        打开账号页
+                      </Link>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </>
+            ) : null}
           </Card>
         );
       })()}
