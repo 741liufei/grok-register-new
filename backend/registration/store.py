@@ -292,6 +292,29 @@ class RegistrationRepository:
             ).fetchone()
         return row is not None
 
+    def has_registered_or_consumed(self, email: str) -> bool:
+        """成功、已保存 SSO，或已判定账号已注册的邮箱，都应避免再次取用。"""
+        normalized = str(email or "").strip()
+        if not normalized:
+            return False
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM registration_results
+                WHERE email = ? COLLATE NOCASE
+                  AND (
+                    success = 1
+                    OR sso_saved = 1
+                    OR lower(coalesce(failure_type, '')) = 'already_registered'
+                    OR lower(coalesce(email_disable_status, '')) IN ('success', 'failed')
+                  )
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        return row is not None
+
     @staticmethod
     def _result_filters(
         *,
