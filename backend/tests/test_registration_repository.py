@@ -57,7 +57,7 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(registration_results)")}
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
-            self.assertEqual(version, 4)
+            self.assertEqual(version, 5)
             self.assertTrue(
                 {
                     "email_account_id",
