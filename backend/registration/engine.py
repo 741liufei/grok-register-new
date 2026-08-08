@@ -144,6 +144,80 @@ def get_registration_repository():
     return _repository
 
 
+def backfill_access_token_bot_risk(log_callback=None) -> int:
+    """从已有 CPA / Grok2API 授权文件回填 access_token 的 bfs 风控标记。"""
+    try:
+        repo = get_registration_repository()
+    except Exception as exc:
+        if log_callback:
+            log_callback(f"[!] bot_risk 回填初始化失败: {exc}")
+        return 0
+
+    auth_dirs = []
+    for key in ("cpa_auth_dir", "grok2api_auth_dir"):
+        raw = str(config.get(key, "") or "").strip()
+        if not raw:
+            continue
+        path = raw if os.path.isabs(raw) else os.path.join(APP_DIR, raw)
+        if os.path.isdir(path):
+            auth_dirs.append(path)
+    if not auth_dirs:
+        return 0
+
+    updated = 0
+    seen_emails = set()
+    for auth_dir in auth_dirs:
+        try:
+            names = os.listdir(auth_dir)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            file_path = os.path.join(auth_dir, name)
+            try:
+                with open(file_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                continue
+            candidates = []
+            if isinstance(payload, dict):
+                if payload.get("access_token"):
+                    candidates.append(payload)
+                accounts = payload.get("accounts")
+                if isinstance(accounts, list):
+                    candidates.extend(item for item in accounts if isinstance(item, dict))
+            for item in candidates:
+                token = str(item.get("access_token") or "").strip()
+                if not token:
+                    continue
+                email = str(item.get("email") or "").strip().lower()
+                if not email:
+                    email = str(
+                        _s2cpa.decode_jwt_payload(token).get("email")
+                        or _s2cpa.decode_jwt_payload(token).get("sub")
+                        or ""
+                    ).strip().lower()
+                if not email or "@" not in email or email in seen_emails:
+                    continue
+                seen_emails.add(email)
+                bfs = _s2cpa.access_token_bfs(token)
+                bot_risk = _s2cpa.access_token_bot_risk(token)
+                if not bot_risk and bfs is None:
+                    continue
+                try:
+                    count = repo.update_bot_risk_by_email(
+                        email, bot_risk=bot_risk, bfs=bfs if bfs is not None else ""
+                    )
+                except Exception:
+                    continue
+                if count:
+                    updated += count
+    if updated and log_callback:
+        log_callback(f"[*] 已从授权文件回填 bot_risk 标记 {updated} 条")
+    return updated
+
+
 def email_registered_successfully(email):
     """数据库或旧账号文件中已有成功/已消耗记录时返回 True。
 
@@ -521,6 +595,8 @@ def persist_registration_result(
                 "account_file": account_file,
                 "sso_saved": sso_saved,
                 "nsfw_status": nsfw_status,
+                "bot_risk": bool(detail.get("bot_risk")),
+                "bfs": "" if detail.get("bfs") is None else detail.get("bfs"),
                 "extra": extra_data,
             }
         )
@@ -1100,6 +1176,8 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
         grok2api_remote_status="not_configured",
         grok2api_remote_imported_at="",
         grok2api_remote_error="",
+        bot_risk=False,
+        bfs="",
         error="",
     )
     if not cpa_enabled:
@@ -1201,10 +1279,18 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
             _append_sso_pending(email, sso, log_callback=log_callback)
             return False
         record = _s2cpa.token_to_cpa_record(token, email=email, sso=sso)
-        ap = _s2cpa.decode_jwt_payload(record.get("access_token", ""))
+        access_token = str(record.get("access_token") or "")
+        ap = _s2cpa.decode_jwt_payload(access_token)
         ref = ap.get("referrer")
         if ref:
             _cpa_log(f"access_token referrer={ref!r}")
+        bfs = _s2cpa.access_token_bfs(access_token)
+        bot_risk = _s2cpa.access_token_bot_risk(access_token)
+        _set_result(bfs=bfs if bfs is not None else "", bot_risk=bot_risk)
+        if bot_risk:
+            _cpa_log(f"access_token 机器人风控标记 bfs={bfs!r}")
+        elif bfs is not None:
+            _cpa_log(f"access_token bfs={bfs!r}")
         wrote_ok = False
         auth_entries = []
         auth_errors = list(preflight_errors)
