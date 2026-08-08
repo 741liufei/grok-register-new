@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  Bot,
   Braces,
   Bug,
   Camera,
@@ -20,6 +19,7 @@ import {
   Power,
   RefreshCw,
   Search,
+  ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
@@ -231,7 +231,7 @@ function AccountDetails({
     ["邮箱", detail.email],
     ["密码", showPassword ? detail.password : maskSecret(detail.password)],
     ["状态", detail.status],
-    ["机器人风控", detail.bot_risk ? "是（bfs=1）" : "否"],
+    ["风控标记", detail.bot_risk ? "是（该账号被打上机器人标记）" : "否"],
     ["CPA", detail.cpa_status],
     ["服务商", detail.provider],
     ["NSFW", detail.nsfw_status],
@@ -266,8 +266,8 @@ function AccountDetails({
           <Badge variant={statusVariant(detail.status)}>{detail.status || "unknown"}</Badge>
           {detail.bot_risk ? (
             <Badge variant="warning">
-              <Bot className="mr-1 h-3 w-3" aria-hidden="true" />
-              机器人风控
+              <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+              风控标记
             </Badge>
           ) : null}
           <Badge variant={cpaVariant(detail.cpa_status)}>CPA {detail.cpa_status || "-"}</Badge>
@@ -1051,10 +1051,10 @@ export function AccountsPage() {
               setBotRiskFilter(e.target.value);
               setSelected({});
             }}
-            aria-label="按机器人风控筛选"
+            aria-label="按风控标记筛选"
           >
-            <option value="">全部风控</option>
-            <option value="1">机器人风控</option>
+            <option value="">不限</option>
+            <option value="1">风控标记</option>
             <option value="0">正常账号</option>
           </Select>
           <div className="relative min-w-0 sm:col-span-2 lg:col-span-1">

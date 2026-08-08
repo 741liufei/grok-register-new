@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Archive, Bot, Copy, Download, Loader2, Search, UploadCloud } from "lucide-react";
+import { Archive, Copy, Download, Loader2, Search, ShieldAlert, UploadCloud } from "lucide-react";
 import { AccountEmailLabel } from "@/components/AccountEmailIcon";
 import { Badge, Button, Card, EmptyState, Input, PageHeader, PaginationBar, Toast } from "@/components/ui";
 import { api, type AccountRecord, type AuthKind } from "@/lib/api";
@@ -187,8 +187,8 @@ export function CredentialsPage() {
                         <Badge variant={available ? "success" : "secondary"}>{available ? "文件可用" : "无文件"}</Badge>
                         {item.bot_risk ? (
                           <Badge variant="warning">
-                            <Bot className="mr-1 h-3 w-3" aria-hidden="true" />
-                            机器人风控
+                            <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+                            风控标记
                           </Badge>
                         ) : null}
                         {remoteStatus && remoteStatus !== "not_configured" ? <Badge variant={remoteStatus === "success" ? "success" : remoteStatus === "failed" ? "destructive" : "warning"}>远程 {remoteStatus}</Badge> : null}

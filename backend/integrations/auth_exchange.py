@@ -180,7 +180,7 @@ def access_token_bfs(token: str):
 
 
 def access_token_bot_risk(token: str) -> bool:
-    """access_token 的 bfs=1 表示机器人风控标记。"""
+    """access_token 的 bfs=1 表示风控标记。"""
     bfs = access_token_bfs(token)
     return bfs == 1 or bfs == "1"
 

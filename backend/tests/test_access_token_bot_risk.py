@@ -1,4 +1,4 @@
-"""access_token JWT bfs=1 机器人风控标记。"""
+"""access_token JWT bfs=1 风控标记。"""
 
 import base64
 import json

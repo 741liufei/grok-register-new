@@ -1,4 +1,4 @@
-import { Bot, Mail } from "lucide-react";
+import { Mail, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function AccountEmailIcon({
@@ -10,10 +10,10 @@ export function AccountEmailIcon({
 }) {
   if (botRisk) {
     return (
-      <span title="机器人风控（access_token bfs=1）" className="inline-flex">
-        <Bot
+      <span title="该账号被打上机器人标记" className="inline-flex">
+        <ShieldAlert
           className={cn("h-4 w-4 shrink-0 text-amber-600", className)}
-          aria-label="机器人风控 bfs=1"
+          aria-label="该账号被打上机器人标记"
         />
       </span>
     );

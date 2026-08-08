@@ -1288,7 +1288,7 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
         bot_risk = _s2cpa.access_token_bot_risk(access_token)
         _set_result(bfs=bfs if bfs is not None else "", bot_risk=bot_risk)
         if bot_risk:
-            _cpa_log(f"access_token 机器人风控标记 bfs={bfs!r}")
+            _cpa_log(f"access_token 风控标记 bfs={bfs!r}")
         elif bfs is not None:
             _cpa_log(f"access_token bfs={bfs!r}")
         wrote_ok = False

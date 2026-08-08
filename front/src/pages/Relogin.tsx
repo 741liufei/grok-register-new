@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Bot, CheckCircle2, History, Loader2, RefreshCcw, Search, XCircle } from "lucide-react";
+import { CheckCircle2, History, Loader2, RefreshCcw, Search, ShieldAlert, XCircle } from "lucide-react";
 import { AccountEmailLabel } from "@/components/AccountEmailIcon";
 import { Badge, Button, Card, EmptyState, Input, PageHeader, PaginationBar, Toast } from "@/components/ui";
 import { api, type AccountRecord, type ReloginStatus } from "@/lib/api";
@@ -235,8 +235,8 @@ export function ReloginPage() {
                         {item.bot_risk ? (
                           <div className="mt-1">
                             <Badge variant="warning">
-                              <Bot className="mr-1 h-3 w-3" aria-hidden="true" />
-                              机器人风控
+                              <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+                              风控标记
                             </Badge>
                           </div>
                         ) : null}
@@ -265,8 +265,8 @@ export function ReloginPage() {
                       {!item.email || !item.password ? <Badge variant="warning">缺少凭据</Badge> : null}
                       {item.bot_risk ? (
                         <Badge variant="warning">
-                          <Bot className="mr-1 h-3 w-3" aria-hidden="true" />
-                          机器人风控
+                          <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+                          风控标记
                         </Badge>
                       ) : null}
                       {item.cpa_auth_available ? <Badge variant="success">CPA</Badge> : null}
@@ -312,8 +312,8 @@ export function ReloginPage() {
                   {botRiskByAccountId.get(item.account_id) ? (
                     <div className="mt-1">
                       <Badge variant="warning">
-                        <Bot className="mr-1 h-3 w-3" aria-hidden="true" />
-                        机器人风控
+                        <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+                        风控标记
                       </Badge>
                     </div>
                   ) : null}
