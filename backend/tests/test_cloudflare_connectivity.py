@@ -82,19 +82,41 @@ class CloudflareConnectivityTests(unittest.TestCase):
         self.assertIn("鉴权失败", detail)
 
     def test_probe_skips_http_when_auth_is_none(self):
-        # auth_mode=none 的直建模式不应发任何 HTTP 探活请求（避免 401 困扰）。
+        # auth_mode=none 的直建模式不应发任何 HTTP 探活请求（避免 401 困扰），
+        # 只做 TCP 在线探测；用 mock 避免依赖真实网络/假域名。
         http_get = mock.Mock()
         http_post = mock.Mock()
 
-        name, ok, detail = network_checks.check_email_api(
-            "cloudflare",
-            self._cloudflare_config(cloudflare_auth_mode="none", cloudflare_api_key=""),
-            http_get,
-            http_post,
-        )
+        with mock.patch.object(network_checks, "_tcp_open", return_value=True) as tcp_open:
+            name, ok, detail = network_checks.check_email_api(
+                "cloudflare",
+                self._cloudflare_config(cloudflare_auth_mode="none", cloudflare_api_key=""),
+                http_get,
+                http_post,
+            )
 
         self.assertEqual(name, "邮箱API")
         self.assertTrue(ok, detail)
+        self.assertIn("直建模式", detail)
+        tcp_open.assert_called_once_with("temp-mail.example.com", 443)
+        http_get.assert_not_called()
+        http_post.assert_not_called()
+
+    def test_probe_reports_tcp_failure_when_auth_is_none(self):
+        http_get = mock.Mock()
+        http_post = mock.Mock()
+
+        with mock.patch.object(network_checks, "_tcp_open", return_value=False):
+            name, ok, detail = network_checks.check_email_api(
+                "cloudflare",
+                self._cloudflare_config(cloudflare_auth_mode="none", cloudflare_api_key=""),
+                http_get,
+                http_post,
+            )
+
+        self.assertEqual(name, "邮箱API")
+        self.assertFalse(ok)
+        self.assertIn("不可达", detail)
         http_get.assert_not_called()
         http_post.assert_not_called()
 
