@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from .account_exports import build_account_auth_archive, build_sso_archive, read_sso_token
 from .jobs import job_coordinator
 from .relogin_jobs import relogin_coordinator
+from backend.integrations.proxy import validate_http_proxy_url
 from backend.shared.paths import DATA_ROOT, PROJECT_ROOT, STATIC_ROOT
 
 APP_DIR = PROJECT_ROOT
@@ -106,6 +107,7 @@ SENSITIVE_HINT_KEYS = {
     "mailnest_api_key",
     "yyds_api_key",
     "yyds_jwt",
+    "proxy",
 }
 
 
@@ -299,6 +301,14 @@ def _config_file_snapshot() -> Dict[str, Any]:
 def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
     gr = _gr()
     gr.load_config()
+    proxy_update: Optional[str] = None
+    if "proxy" in updates:
+        proxy_update = str(updates.get("proxy") or "").strip()
+        if proxy_update.lower().startswith(("http:", "https:")):
+            try:
+                proxy_update = validate_http_proxy_url(proxy_update)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"网络代理格式错误: {exc}") from exc
     changed: List[str] = []
     for key in CONFIG_PUBLIC_KEYS:
         if key not in updates:
@@ -360,7 +370,7 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "duckmail_api_base",
             "cloudflare_api_base",
         ):
-            value = str(value or "").strip()
+            value = proxy_update if key == "proxy" else str(value or "").strip()
         else:
             if isinstance(value, (dict, list)):
                 continue

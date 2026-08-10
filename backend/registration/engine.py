@@ -41,7 +41,7 @@ from backend.automation import session as _bs
 from backend.registration import signup_flow as _rf
 from backend.integrations import network_checks as _conn
 from backend.registration.store import RegistrationRepository
-from backend.integrations.proxy import resolve_proxy_url
+from backend.integrations.proxy import redact_proxy_text, redact_proxy_url, resolve_proxy_url
 from backend.shared.paths import DATA_ROOT, PROJECT_ROOT
 from backend.automation.session import (
     browser,
@@ -743,7 +743,7 @@ def _log_actual_http_route(method, url, *, proxies=None, proxy=""):
             or proxies.get("http")
             or ""
         ).strip()
-    route = f"代理 {proxy_value}" if proxy_value else "直连（不使用代理）"
+    route = f"代理 {redact_proxy_url(proxy_value)}" if proxy_value else "直连（不使用代理）"
     key = (str(method or "GET").upper(), display_url, route)
     with _network_route_log_lock:
         if key in _network_route_log_keys:
@@ -1284,7 +1284,7 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
 
     def _cpa_log(message):
         if log_callback:
-            log_callback(f"[CPA] {str(message).strip()}")
+            log_callback(f"[CPA] {redact_proxy_text(message).strip()}")
 
     try:
         token_mode = str(config.get("cpa_token_mode", "device_protocol") or "device_protocol").lower()

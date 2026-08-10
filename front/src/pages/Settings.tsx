@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
   Cloud,
+  Eye,
+  EyeOff,
   HelpCircle,
   Mail,
   RefreshCw,
@@ -136,25 +138,41 @@ function ConfigField({
   placeholder?: string;
   helper?: string;
 }) {
+  const [showSecret, setShowSecret] = useState(false);
+  const isPassword = type === "password";
   return (
     <div className="min-w-0 space-y-2">
       <Label htmlFor={field}>{label}</Label>
-      <Input
-        id={field}
-        type={type}
-        inputMode={type === "number" ? "numeric" : undefined}
-        autoComplete={type === "password" ? "new-password" : "off"}
-        placeholder={placeholder}
-        value={config[field] ?? ""}
-        onChange={(event) =>
-          onFieldChange(
-            field,
-            type === "number" && event.target.value !== ""
-              ? Number(event.target.value)
-              : event.target.value
-          )
-        }
-      />
+      <div className="relative">
+        <Input
+          id={field}
+          type={isPassword && showSecret ? "text" : type}
+          inputMode={type === "number" ? "numeric" : undefined}
+          autoComplete={isPassword ? "new-password" : "off"}
+          className={isPassword ? "pr-10" : undefined}
+          placeholder={placeholder}
+          value={config[field] ?? ""}
+          onChange={(event) =>
+            onFieldChange(
+              field,
+              type === "number" && event.target.value !== ""
+                ? Number(event.target.value)
+                : event.target.value
+            )
+          }
+        />
+        {isPassword ? (
+          <button
+            type="button"
+            className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition hover:text-foreground"
+            aria-label={showSecret ? `隐藏${label}` : `显示${label}`}
+            aria-pressed={showSecret}
+            onClick={() => setShowSecret((value) => !value)}
+          >
+            {showSecret ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+          </button>
+        ) : null}
+      </div>
       {helper ? <p className="text-xs leading-5 text-muted-foreground">{helper}</p> : null}
     </div>
   );
@@ -371,7 +389,14 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
             </div>
-            <ConfigField {...fieldState} label="网络代理" field="proxy" placeholder="http://127.0.0.1:7890" />
+            <ConfigField
+              {...fieldState}
+              label="网络代理"
+              field="proxy"
+              type="password"
+              placeholder="http://user:password@host:port"
+              helper="支持无认证或用户名/密码认证的 HTTP(S) 代理；凭据含 @、:、/、#、% 等特殊字符时请使用 URL 百分号编码，例如 @ 写成 %40。注册浏览器与 xAI/OAuth 请求会共用此代理。"
+            />
             <ConfigField {...fieldState}
               label="账号间隔（秒）"
               field="account_interval"
