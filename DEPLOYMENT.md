@@ -187,13 +187,13 @@ docker compose -f compose.yaml -f compose.monitor.yaml up -d
 http://monitor-backend:8090/api/integrations/grok-register/account-imported
 ```
 
-监控后端只有 `expose: 8090`，没有映射宿主机端口；注册机通过 Compose 内部网络投递 Webhook。监控前端仅绑定宿主机回环地址：
+监控后端只有 `expose: 8090`，没有映射宿主机端口；注册机通过 Compose 内部网络投递 Webhook。监控前端默认绑定宿主机所有网卡：
 
 ```text
-127.0.0.1:${MONITOR_WEB_PORT:-8091}
+0.0.0.0:${MONITOR_WEB_PORT:-8091}
 ```
 
-因此反向代理应将监控域名整体转发到 `127.0.0.1:8091`，由监控前端 Nginx 再把 `/api` 转发到内部后端。
+因此可直接通过 `http://服务器公网IP:8091` 访问。若只允许反向代理访问，在 `.env` 设置 `MONITOR_WEB_BIND=127.0.0.1`，再将监控域名整体转发到 `127.0.0.1:8091`。监控前端 Nginx 会把 `/api` 转发到内部后端。
 
 首次启动后还需在两个页面完成配置：
 

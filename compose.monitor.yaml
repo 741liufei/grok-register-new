@@ -48,7 +48,7 @@ services:
       monitor-backend:
         condition: service_healthy
     ports:
-      - 127.0.0.1:${MONITOR_WEB_PORT:-8091}:80
+      - "${MONITOR_WEB_BIND:-0.0.0.0}:${MONITOR_WEB_PORT:-8091}:80"
 
 volumes:
   monitor-data:
