@@ -326,7 +326,11 @@ compose.monitor.yaml    Grok Account Monitor 联动编排
 
 ## Stars 趋势
 
-[![Grok Register Stars 趋势](docs/images/stars-trend.svg)](https://github.com/kaibush/grok-register)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/stars-trend-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/stars-trend-light.svg">
+  <img alt="Grok Register Stars 趋势" src="docs/images/stars-trend-light.svg">
+</picture>
 
 ## 友情链接
 
