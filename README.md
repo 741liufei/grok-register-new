@@ -81,6 +81,55 @@ Docker 首次生成 `data/config.json` 时会预填该内部地址；已有配�
 
 OutlookEmail 数据保存在 `outlookemail-data/`，并已被 Git 和 Docker 构建上下文忽略。完整配置见 [DEPLOYMENT.md](DEPLOYMENT.md#可选-outlookemail-邮箱池)。
 
+## 与 Grok Account Monitor 联动
+
+本项目可与 [Grok Account Monitor](https://github.com/kaibush/grok-account-monitor) 统一编排。Grok Register 将账号成功导入 Grok2API 后，会通过持久 Webhook 通知 Monitor；Monitor 接收并去重账号事件，还可按设置自动执行首次质量探针。
+
+```text
+Grok Register 注册并导入 Grok2API
+              │
+              └─ 持久 Webhook / 失败退避重试
+                         │
+                         ▼
+              Grok Account Monitor
+              接收账号 → 自动探针 → 风险与质量监控
+```
+
+复制环境变量模板，并至少为两端设置相同的联动 Token：
+
+```bash
+cp .env.example .env
+
+# 编辑 .env
+MONITOR_WEBHOOK_TOKEN=替换为随机长字符串
+```
+
+随后使用两个 Compose 文件启动注册机、Monitor 后端和 Monitor 前端：
+
+```bash
+docker compose -f compose.yaml -f compose.monitor.yaml pull
+docker compose -f compose.yaml -f compose.monitor.yaml up -d
+```
+
+默认访问地址：
+
+```text
+Grok Register:       http://服务器IP:8787
+Grok Account Monitor: http://服务器IP:8091
+```
+
+Monitor 前端通过容器内 Nginx 将 `/api` 请求转发至 `monitor-backend:8090`，因此 Monitor 后端端口无需暴露到宿主机。`8091` 默认监听所有网卡；使用反向代理时可在 `.env` 设置 `MONITOR_WEB_BIND=127.0.0.1`。
+
+验证联动服务：
+
+```bash
+docker compose -f compose.yaml -f compose.monitor.yaml ps
+curl http://127.0.0.1:8091/api/health
+docker compose -f compose.yaml -f compose.monitor.yaml logs -f monitor-backend monitor-frontend
+```
+
+首次启动后，在 Monitor 的“系统设置 → 联动与启动项”中保存联动 Token、首次探针方案和出口目标；再到 Grok Register 的“系统设置 → Grok2API”中启用账号监控联动并填写相同 Token。完整说明见 [DEPLOYMENT.md](DEPLOYMENT.md#与-grok-account-monitor-统一编排)。
+
 ## 配置文件
 
 ### 本机运行
@@ -272,7 +321,12 @@ data/                   运行数据
 logs/                   运行日志
 outlookemail-data/      可选 OutlookEmail 数据
 compose.yaml            Docker Compose 配置
+compose.monitor.yaml    Grok Account Monitor 联动编排
 ```
+
+## Stars 趋势
+
+[![Grok Register Stars 趋势](docs/images/stars-trend.svg)](https://github.com/kaibush/grok-register)
 
 ## 友情链接
 
