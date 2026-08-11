@@ -22,6 +22,7 @@
 - Camoufox 浏览器，支持多 worker 和异常进程清理
 - 支持 Cloudflare、DuckMail / Mail.tm、YYDS、MailNest、OutlookEmail、CloudMail
 - 注册完成后生成 CPA / Grok2API JSON
+- Grok Build 导入成功后可通过持久 Webhook 通知 Grok Account Monitor
 - JSON 查看、复制和下载
 - 首次访问创建唯一管理员账号
 - Docker Compose 部署，支持无桌面 Linux 服务器
@@ -173,6 +174,10 @@ Windows 启动：
 | `grok2api_remote_username` | 远程 Grok2API 管理员账号 |
 | `grok2api_remote_password` | 远程 Grok2API 管理员密码 |
 | `grok2api_auto_import` | JSON 生成后自动登录并导入远程 Grok2API |
+| `monitor_webhook_enabled` | 导入 Grok Build 后发送账号已导入 Webhook |
+| `monitor_webhook_url` | 监控端 `account-imported` 接口地址 |
+| `monitor_webhook_token` | Webhook 请求头 `x-monitor-token` |
+| `monitor_webhook_timeout_seconds` | 单次投递超时；失败后由持久 Outbox 退避重试 |
 
 配置模板见 [`config.example.json`](config.example.json)。
 

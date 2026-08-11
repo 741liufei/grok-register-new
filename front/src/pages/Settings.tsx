@@ -11,6 +11,7 @@ import {
   Save,
   Settings2,
   ShieldCheck,
+  Webhook,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
@@ -500,30 +501,72 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
             ) : null}
 
             {section === "grok2api" ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Grok2API 目标</CardTitle>
-                <CardDescription>保存 Grok Build、Grok Web、Grok Console 三种 JSON，并通过管理员账号登录远程服务导入。</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <ConfigField {...fieldState} label="本地授权目录" field="grok2api_auth_dir" />
-                <ConfigField
-                  {...fieldState}
-                  label="远程 API 地址"
-                  field="grok2api_remote_url"
-                  placeholder="https://api.example.com"
-                  helper="填写站点根地址，不要附加 /api/admin/v1"
-                />
-                <ConfigField {...fieldState} label="管理员账号" field="grok2api_remote_username" />
-                <ConfigField {...fieldState} label="管理员密码" field="grok2api_remote_password" type="password" />
-                <ToggleRow
-                  title="转换成功后自动导入"
-                  description="生成三种 Grok2API JSON 后立即登录远程管理端并逐个导入；导入结果单独记录"
-                  checked={!!config.grok2api_auto_import}
-                  onCheckedChange={(value) => setField("grok2api_auto_import", value)}
-                />
-              </CardContent>
-            </Card>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Grok2API 目标</CardTitle>
+                  <CardDescription>保存 Grok Build、Grok Web、Grok Console 三种 JSON，并通过管理员账号登录远程服务导入。</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <ConfigField {...fieldState} label="本地授权目录" field="grok2api_auth_dir" />
+                  <ConfigField
+                    {...fieldState}
+                    label="远程 API 地址"
+                    field="grok2api_remote_url"
+                    placeholder="https://api.example.com"
+                    helper="填写站点根地址，不要附加 /api/admin/v1"
+                  />
+                  <ConfigField {...fieldState} label="管理员账号" field="grok2api_remote_username" />
+                  <ConfigField {...fieldState} label="管理员密码" field="grok2api_remote_password" type="password" />
+                  <ToggleRow
+                    title="转换成功后自动导入"
+                    description="生成三种 Grok2API JSON 后立即登录远程管理端并逐个导入；导入结果单独记录"
+                    checked={!!config.grok2api_auto_import}
+                    onCheckedChange={(value) => setField("grok2api_auto_import", value)}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex-row items-start gap-3">
+                  <SectionIcon><Webhook className="h-5 w-5" aria-hidden="true" /></SectionIcon>
+                  <div>
+                    <CardTitle>账号监控 Webhook</CardTitle>
+                    <CardDescription>
+                      仅在 grok_build 导入成功后发送账号已导入事件；注册机不查询监控处理结果。
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <ToggleRow
+                    title="启用账号监控联动"
+                    description="自动导入与账号页手动导入共用同一持久通知队列"
+                    checked={!!config.monitor_webhook_enabled}
+                    onCheckedChange={(value) => setField("monitor_webhook_enabled", value)}
+                  />
+                  <ConfigField
+                    {...fieldState}
+                    label="Webhook URL"
+                    field="monitor_webhook_url"
+                    placeholder="http://monitor-backend:8090/api/integrations/grok-register/account-imported"
+                    helper="统一 Compose 内使用 monitor-backend 容器名；独立部署可填写监控服务内网地址"
+                  />
+                  <ConfigField
+                    {...fieldState}
+                    label="联动 Token"
+                    field="monitor_webhook_token"
+                    type="password"
+                  />
+                  <ConfigField
+                    {...fieldState}
+                    label="请求超时（秒）"
+                    field="monitor_webhook_timeout_seconds"
+                    type="number"
+                    helper="注册机只判断 Webhook 是否收到 HTTP 2xx，不读取后续探针或风险结果"
+                  />
+                </CardContent>
+              </Card>
+            </div>
             ) : null}
           </div>
         </div>

@@ -26,6 +26,7 @@ from curl_cffi import requests
 
 # 授权交换和导出逻辑集中在 integrations 包，编排层只负责调用。
 from backend.integrations import auth_exchange as _s2cpa
+from backend.integrations import account_monitor as _account_monitor
 from backend.integrations import grok2api_client as _grok2api
 from backend.mailbox import cloudflare_worker as cloudflare_provider
 from backend.mailbox import cloud_mail as cloudmail_provider
@@ -261,6 +262,20 @@ def email_registered_successfully(email):
     return os.path.isfile(account_file_for_email(normalized))
 
 
+def _environment_int(name, default):
+    try:
+        return int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _environment_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 DEFAULT_CONFIG = {
     "email_provider": "cloudflare",
     "duckmail_api_key": "",
@@ -314,6 +329,14 @@ DEFAULT_CONFIG = {
     "grok2api_remote_username": "",
     "grok2api_remote_password": "",
     "grok2api_auto_import": True,
+    "monitor_webhook_enabled": _environment_bool(
+        "GROK_MONITOR_WEBHOOK_ENABLED", False
+    ),
+    "monitor_webhook_url": os.environ.get("GROK_MONITOR_WEBHOOK_URL", ""),
+    "monitor_webhook_token": os.environ.get("GROK_MONITOR_WEBHOOK_TOKEN", ""),
+    "monitor_webhook_timeout_seconds": _environment_int(
+        "GROK_MONITOR_WEBHOOK_TIMEOUT_SECONDS", 10
+    ),
     "mailnest_api_key": "",
     "mailnest_project_code": "x-ai001",
     # YYDS：留空自动选已验证域名；填写则固定该域名
@@ -609,7 +632,8 @@ def persist_registration_result(
     disable_detail = default_email_disable_detail(provider_name, detail)
     disable_detail.update(dict(email_disable_detail or {}))
     try:
-        return get_registration_repository().add_result(
+        repository = get_registration_repository()
+        registration_id = repository.add_result(
             {
                 "batch_id": batch_id,
                 "source": source,
@@ -653,6 +677,27 @@ def persist_registration_result(
                 "extra": extra_data,
             }
         )
+        if _account_monitor.grok_build_import_succeeded(
+            detail.get("grok2api_remote_result")
+        ):
+            try:
+                record = repository.get_results_by_ids([registration_id])[0]
+                event = _account_monitor.enqueue_imported_account(
+                    repository,
+                    record,
+                    config,
+                )
+                if event and log_callback:
+                    log_callback(
+                        "[Monitor] 已加入账号监控通知队列: "
+                        f"{event.get('event_id')}"
+                    )
+            except Exception as monitor_exc:
+                if log_callback:
+                    log_callback(
+                        f"[Monitor] 账号已导入 Grok2API，但监控通知入队失败: {monitor_exc}"
+                    )
+        return registration_id
     except Exception as exc:
         if log_callback:
             log_callback(f"[!] SQLite 保存注册结果失败: {exc}")
