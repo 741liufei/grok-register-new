@@ -369,7 +369,7 @@ export function SsoCheckHistoryPage() {
   const navigate = useNavigate();
   const [entries, setEntries] = useState<SsoCheckHistoryEntry[]>([]);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "flagged" | "unknown">("all");
+  const [filter, setFilter] = useState<"all" | "clean" | "flagged" | "unknown">("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   useEffect(() => { void loadSsoCheckHistory().then(setEntries); }, []);
@@ -378,6 +378,7 @@ export function SsoCheckHistoryPage() {
     if (!selected) return [];
     const keyword = query.trim().toLowerCase();
     return selected.items.filter((item) => {
+      if (filter === "clean" && item.status !== "clean") return false;
       if (filter === "flagged" && item.status !== "flagged") return false;
       if (filter === "unknown" && !["unknown", "failed"].includes(item.status)) return false;
       return !keyword || item.email.toLowerCase().includes(keyword);
@@ -393,7 +394,7 @@ export function SsoCheckHistoryPage() {
       {!selected ? <Card className="p-5"><EmptyState title="报告不存在" description="该报告可能已删除或浏览器数据已清理。" /></Card> : <>
         <PageHeader title="SSO 风控报告" description={`完成于 ${formatWhen(selected.finished_at)}`} actions={<Button variant="outline" className="text-red-700" onClick={() => void remove(selected.run_id)}><Trash2 className="h-4 w-4" />删除</Button>} />
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[["账号", selected.total_count, "text-slate-950", CheckCircle2], ["正常", selected.clean_count, "text-emerald-700", ShieldCheck], ["异常", selected.flagged_count, "text-red-700", ShieldAlert], ["未知 / 失败", selected.unknown_count + selected.failed_count, "text-amber-700", AlertTriangle]].map(([label, value, tone, Icon]: any) => <Card key={label} className="p-4"><div className="flex items-center justify-between"><span className="text-xs text-slate-500">{label}</span><Icon className={`h-4 w-4 ${tone}`} /></div><div className={`mt-2 text-2xl font-semibold tabular-nums ${tone}`}>{value}</div></Card>)}</section>
-        <Card className="overflow-hidden"><div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索邮箱" className="pl-9" /></div><Select value={filter} onChange={(event) => { setFilter(event.target.value as typeof filter); setPage(1); }} className="sm:w-40" aria-label="筛选风控结果"><option value="all">全部结果</option><option value="flagged">仅异常</option><option value="unknown">未知 / 失败</option></Select></div><SsoResultTable items={paged} />{reportItems.length ? <PaginationBar page={safePage} pageSize={pageSize} total={reportItems.length} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} /> : null}</Card>
+        <Card className="overflow-hidden"><div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索邮箱" className="pl-9" /></div><Select value={filter} onChange={(event) => { setFilter(event.target.value as typeof filter); setPage(1); }} className="sm:w-40" aria-label="筛选风控结果"><option value="all">全部结果</option><option value="clean">仅正常</option><option value="flagged">仅异常</option><option value="unknown">未知 / 失败</option></Select></div><SsoResultTable items={paged} />{reportItems.length ? <PaginationBar page={safePage} pageSize={pageSize} total={reportItems.length} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} /> : null}</Card>
       </>}
     </div>
   );
