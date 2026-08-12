@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Sub2API 客户端单元测试：请求头、body 裁剪与错误截断。"""
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from backend.integrations import sub2api_client
@@ -12,15 +14,12 @@ class FakeResponse:
         self.status_code = status
         self._payload = payload
         self.text = text
-        self.closed = False
+
 
     def json(self):
         if isinstance(self._payload, Exception):
             raise self._payload
         return self._payload
-
-    def close(self):
-        self.closed = True
 
 
 class FakeSession:
@@ -197,10 +196,6 @@ class Sub2APIEngineIntegrationTests(unittest.TestCase):
         return cfg
 
     def test_sub2api_disabled_marks_status_and_skips_request(self):
-        import tempfile
-        from pathlib import Path
-        from unittest import mock
-
         g2a_dir = tempfile.mkdtemp()
         self.engine.config.update(
             self._base_config(grok2api_auth_dir=g2a_dir, sub2api_enabled=False)
@@ -242,10 +237,6 @@ class Sub2APIEngineIntegrationTests(unittest.TestCase):
         from_config.assert_not_called()
 
     def test_sub2api_success_records_status(self):
-        import tempfile
-        from pathlib import Path
-        from unittest import mock
-
         g2a_dir = tempfile.mkdtemp()
         self.engine.config.update(
             self._base_config(
@@ -305,8 +296,6 @@ class Sub2APIEngineIntegrationTests(unittest.TestCase):
         self.assertEqual(call_kwargs.kwargs.get("name"), "pref")
 
     def test_token_exchange_failure_skips_sub2api(self):
-        from unittest import mock
-
         self.engine.config.update(
             self._base_config(
                 cpa_auth_dir="/tmp/cpa-not-used",
@@ -334,10 +323,6 @@ class Sub2APIEngineIntegrationTests(unittest.TestCase):
         from_config.assert_not_called()
 
     def test_cpa_upload_disabled_skips_remote_upload(self):
-        import tempfile
-        from pathlib import Path
-        from unittest import mock
-
         auth_dir = tempfile.mkdtemp()
         self.engine.config.update(
             self._base_config(
