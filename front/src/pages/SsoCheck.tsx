@@ -5,11 +5,13 @@ import {
   CheckCircle2,
   Clock3,
   History,
+  ListChecks,
   Loader2,
   Search,
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  X,
 } from "lucide-react";
 import { AccountPageContext } from "@/components/AccountPageContext";
 import { AccountEmailLabel } from "@/components/AccountEmailIcon";
@@ -48,6 +50,8 @@ function resultNote(item: SsoCheckItem) {
 function formatWhen(value: number | null | undefined) {
   return value ? new Date(value * 1000).toLocaleString() : "时间未知";
 }
+
+const SSO_RESULT_PAGE_SIZE = 20;
 
 function SsoResultTable({ items }: { items: SsoCheckItem[] }) {
   return (
@@ -93,6 +97,72 @@ function SsoResultTable({ items }: { items: SsoCheckItem[] }) {
   );
 }
 
+function SsoResultsDrawer({
+  status,
+  items,
+  page,
+  onPageChange,
+  onClose,
+}: {
+  status: SsoCheckStatus;
+  items: SsoCheckItem[];
+  page: number;
+  onPageChange: (page: number) => void;
+  onClose: () => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(status.items.length / SSO_RESULT_PAGE_SIZE));
+  return (
+    <div className="fixed inset-0 z-[100] flex justify-end">
+      <button
+        type="button"
+        tabIndex={-1}
+        className="absolute inset-0 bg-slate-950/45"
+        aria-label="关闭本次检查结果"
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sso-results-title"
+        aria-describedby="sso-results-description"
+        className="relative flex h-full w-full max-w-4xl flex-col border-l border-slate-200 bg-white shadow-2xl"
+      >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="sso-results-title" className="font-semibold text-slate-950">本次检查结果</h2>
+              <Badge variant={status.running ? "default" : "success"}>{status.running ? "检查中" : "已完成"}</Badge>
+            </div>
+            <p id="sso-results-description" className="mt-1 text-xs text-slate-500">
+              共 {status.items.length} 个账号 · 每页 20 条 · 第 {page} / {totalPages} 页
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Badge variant="success">正常 {status.clean_count}</Badge>
+              <Badge variant="destructive">异常 {status.flagged_count}</Badge>
+              <Badge variant="warning">未知 {status.unknown_count}</Badge>
+              {status.failed_count ? <Badge variant="destructive">失败 {status.failed_count}</Badge> : null}
+            </div>
+          </div>
+          <Button size="icon" variant="ghost" className="shrink-0" onClick={onClose} aria-label="关闭本次检查结果">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <SsoResultTable items={items} />
+        </div>
+        <div className="shrink-0 bg-white pb-[env(safe-area-inset-bottom)]">
+          <PaginationBar
+            page={page}
+            pageSize={SSO_RESULT_PAGE_SIZE}
+            total={status.items.length}
+            onPageChange={onPageChange}
+          />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 export function SsoCheckPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
@@ -108,7 +178,7 @@ export function SsoCheckPage() {
   const [reloginRunning, setReloginRunning] = useState(false);
   const [status, setStatus] = useState<SsoCheckStatus | null>(null);
   const [resultPage, setResultPage] = useState(1);
-  const [resultPageSize, setResultPageSize] = useState(5);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
   const recordedRun = useRef("");
   const preparedSelectionApplied = useRef(false);
@@ -206,13 +276,27 @@ export function SsoCheckPage() {
     setResultPage(1);
   }, [status?.run_id]);
 
+  useEffect(() => {
+    if (!resultsOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResultsOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [resultsOpen]);
+
   const eligible = accounts.filter((item) => item.sso_available);
   const selectedIds = Object.entries(selected).filter(([, checked]) => checked).map(([id]) => Number(id));
   const allSelected = eligible.length > 0 && eligible.every((item) => selected[item.id]);
   const progress = status?.total_count ? Math.round(status.completed_count / status.total_count * 100) : 0;
   const visibleResults = status?.items || [];
-  const safeResultPage = Math.min(resultPage, Math.max(1, Math.ceil(visibleResults.length / resultPageSize)));
-  const pagedResults = visibleResults.slice((safeResultPage - 1) * resultPageSize, safeResultPage * resultPageSize);
+  const safeResultPage = Math.min(resultPage, Math.max(1, Math.ceil(visibleResults.length / SSO_RESULT_PAGE_SIZE)));
+  const pagedResults = visibleResults.slice((safeResultPage - 1) * SSO_RESULT_PAGE_SIZE, safeResultPage * SSO_RESULT_PAGE_SIZE);
 
   const start = async () => {
     if (!selectedIds.length || status?.running) return;
@@ -221,6 +305,7 @@ export function SsoCheckPage() {
     try {
       const result = await api.startSsoCheck(selectedIds);
       recordedRun.current = "";
+      setResultsOpen(false);
       setStatus(result.sso_check);
       notify("SSO 详细检查已启动", "success");
     } catch (error: any) { notify(error.message || "启动检查失败", "error"); }
@@ -247,7 +332,7 @@ export function SsoCheckPage() {
       <PageHeader
         title="SSO 风控检查"
         description="批量读取已保存 SSO 并检查 botFlag；0 为正常，非 0 为异常，空值会按 0 / 2 / 4 / 8 秒自动复查。"
-        actions={<Link to="/accounts/sso-check/history" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><History className="h-4 w-4" />检查历史</Link>}
+        actions={<><Button variant="outline" disabled={!visibleResults.length} onClick={() => setResultsOpen(true)}><ListChecks className="h-4 w-4" />本次结果{visibleResults.length ? ` (${status?.completed_count || 0}/${status?.total_count || visibleResults.length})` : ""}</Button><Link to="/accounts/sso-check/history" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><History className="h-4 w-4" />检查历史</Link></>}
       />
 
       {status?.running ? (
@@ -273,7 +358,7 @@ export function SsoCheckPage() {
         {total > 0 ? <PaginationBar page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={(next) => void load(next)} onPageSizeChange={(size) => { setPageSize(size); setSelected({}); void load(1, query, size); }} /> : null}
       </Card>
 
-      {visibleResults.length ? <Card className="overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5"><div><h2 className="font-semibold">本次检查结果</h2><p className="mt-1 text-xs text-slate-500">共 {visibleResults.length} 个账号 · 第 {safeResultPage} / {Math.max(1, Math.ceil(visibleResults.length / resultPageSize))} 页</p></div><Badge variant="secondary">每页 {resultPageSize} 条</Badge></div><PaginationBar className="border-b border-t-0 bg-slate-50/60" page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} pageSizeOptions={[5, 10, 20]} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /><SsoResultTable items={pagedResults} /><PaginationBar page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} pageSizeOptions={[5, 10, 20]} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /></Card> : null}
+      {resultsOpen && status && visibleResults.length ? <SsoResultsDrawer status={status} items={pagedResults} page={safeResultPage} onPageChange={setResultPage} onClose={() => setResultsOpen(false)} /> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </div>
   );

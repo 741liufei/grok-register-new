@@ -162,7 +162,6 @@ export function PaginationBar({
   onPageChange,
   onPageSizeChange,
   pageSizeOptions = [20, 50, 100],
-  className,
 }: {
   page: number;
   pageSize: number;
@@ -171,7 +170,6 @@ export function PaginationBar({
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
   pageSizeOptions?: number[];
-  className?: string;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(Math.max(1, page), totalPages);
@@ -181,7 +179,7 @@ export function PaginationBar({
   const firstVisiblePage = Math.max(1, Math.min(safePage - 2, totalPages - visibleCount + 1));
   const pageNumbers = Array.from({ length: visibleCount }, (_, index) => firstVisiblePage + index);
   return (
-    <div className={cn("flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5", className)}>
+    <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="flex flex-wrap items-center gap-2">
         <span>共 {total} 条</span>
         <span className="text-slate-300">·</span>
