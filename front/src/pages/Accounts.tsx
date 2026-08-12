@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Braces,
   Bug,
@@ -11,7 +11,7 @@ import {
   Database,
   Download,
   Eye,
-  History,
+  ListChecks,
   Loader2,
   LogIn,
   UploadCloud,
@@ -521,6 +521,7 @@ function AccountDetails({
 }
 
 export function AccountsPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialStatus = searchParams.get("status") || "";
   const initialKeyword = searchParams.get("q") || "";
@@ -541,7 +542,9 @@ export function AccountsPage() {
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [relogin, setRelogin] = useState<ReloginStatus | null>(null);
+  const [ssoCheckRunning, setSsoCheckRunning] = useState(false);
   const [reloginPolling, setReloginPolling] = useState(true);
   const [reloginReport, setReloginReport] = useState<ReloginStatus | null>(null);
   // 已上报过的 run_id，挡住重复弹窗；挂载时看到的陈旧任务只登记基线、不展示。
@@ -549,7 +552,7 @@ export function AccountsPage() {
   // 本次是否真的观察到运行中。用 ref 而非闭包变量：StrictMode 下 effect 会重建。
   const sawRunningRef = useRef(false);
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
-  const [batchBusy, setBatchBusy] = useState<"" | "export-cpa" | "export-grok2api" | "relogin">("");
+  const [batchBusy, setBatchBusy] = useState<"" | "export-cpa" | "export-grok2api" | "relogin" | "sso-check">("");
   const [deleteDialog, setDeleteDialog] = useState<{ ids: number[]; email: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState<"" | "files" | "database">("");
   const [grok2apiImportingId, setGrok2apiImportingId] = useState<number | null>(null);
@@ -632,6 +635,26 @@ export function AccountsPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const result = await api.ssoCheckStatus();
+        if (!active) return;
+        setSsoCheckRunning(!!result.sso_check.running);
+        if (result.sso_check.running) timer = window.setTimeout(poll, 2500);
+      } catch {
+        if (active) timer = window.setTimeout(poll, 5000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!reloginPolling) return;
     let active = true;
     let timer: number | undefined;
@@ -711,6 +734,30 @@ export function AccountsPage() {
     });
   };
 
+  const selectAllFiltered = async () => {
+    setSelectingAll(true);
+    try {
+      const result = await api.accountIds({
+        status,
+        emailDisableStatus,
+        q: keyword,
+        batchId: batchIdFilter || undefined,
+        botRisk: botRiskFilter || undefined,
+      });
+      setSelected(Object.fromEntries((result.ids || []).map((id) => [id, true])));
+      showToast(`已选择当前筛选结果 ${result.total} 个账号`, "success");
+    } catch (err: any) {
+      showToast(err.message || "全选筛选结果失败", "error");
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelected({});
+    setBatchMenuOpen(false);
+  };
+
   const onCopy = async (value: string, label: string) => {
     const ok = await copyText(value);
     showToast(ok ? `已复制${label}` : "复制失败", ok ? "success" : "error");
@@ -788,7 +835,6 @@ export function AccountsPage() {
     setReloginPolling(false);
     if (next.run_id) {
       setReloginReport(next);
-      setReportOpen(true);
       await appendReloginHistory(next);
     }
     await load();
@@ -805,6 +851,28 @@ export function AccountsPage() {
       showToast("已启动批量重新登录", "success");
     } catch (err: any) {
       showToast(err.message || "启动批量重新登录失败", "error");
+    } finally {
+      setBatchBusy("");
+    }
+  };
+
+  const onBatchSsoCheck = async () => {
+    if (!selectedIds.length) return;
+    setBatchMenuOpen(false);
+    setBatchBusy("sso-check");
+    try {
+      const prepared = await api.prepareSsoCheck(selectedIds);
+      if (!prepared.ids.length) throw new Error("所选账号均缺少有效 SSO");
+      window.sessionStorage.setItem("grok-sso-check-selection", JSON.stringify(prepared.ids));
+      if (prepared.unavailable.length) {
+        window.sessionStorage.setItem(
+          "grok-sso-check-selection-note",
+          `已跳过 ${prepared.unavailable.length} 个缺少有效 SSO 的账号`
+        );
+      }
+      navigate("/accounts/sso-check?prepared=1");
+    } catch (err: any) {
+      showToast(err.message || "准备 SSO 详细检查失败", "error");
     } finally {
       setBatchBusy("");
     }
@@ -999,30 +1067,25 @@ export function AccountsPage() {
     <div className="space-y-5 sm:space-y-6">
       <PageHeader
         title="账号管理"
-        description="筛选和查看注册结果，在手机端使用卡片列表，在大屏设备上使用数据表格。"
+        description="集中筛选账号、查看注册与授权状态；选中账号后可批量风控检查、重新登录、导出或删除。"
         actions={
           <>
             <Button variant="outline" onClick={() => void load(page, pageSize)} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
               刷新
             </Button>
-            <Link to="/accounts/relogin/history" className={buttonVariants({ variant: "outline" })}>
-              <History className="h-4 w-4" aria-hidden="true" />
-              登录历史
-            </Link>
-            <Link to="/accounts/relogin" className={buttonVariants({ variant: "outline" })}>
-              <LogIn className="h-4 w-4" aria-hidden="true" />
-              重登中心
-            </Link>
             <AccountBatchActions
               selectedCount={selectedIds.length}
               busy={!!batchBusy}
               menuOpen={batchMenuOpen}
               reloginRunning={!!relogin?.running}
+              ssoCheckRunning={ssoCheckRunning || batchBusy === "sso-check"}
+              taskConflict={!!relogin?.running || ssoCheckRunning}
               onToggleMenu={() => setBatchMenuOpen((open) => !open)}
               onCloseMenu={() => setBatchMenuOpen(false)}
               onExport={(kind) => void onBatchExport(kind)}
               onRelogin={() => void onBatchRelogin()}
+              onSsoCheck={() => void onBatchSsoCheck()}
               onDelete={() => {
                 setBatchMenuOpen(false);
                 openDeleteDialog(selectedIds);
@@ -1078,82 +1141,103 @@ export function AccountsPage() {
           <Link to="/accounts" className="ml-3 text-sky-700 underline-offset-2 hover:underline">清除</Link>
         </div>
       ) : null}
+      {selectedIds.length ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            已选择 <strong className="tabular-nums">{selectedIds.length}</strong> 个账号
+            {selectedIds.length === total && total > items.length ? "（当前筛选结果全部）" : allVisibleSelected ? "（当前页全部）" : ""}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedIds.length < total ? (
+              <Button size="sm" variant="outline" disabled={selectingAll || loading} onClick={() => void selectAllFiltered()}>
+                {selectingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ListChecks className="h-4 w-4" aria-hidden="true" />}
+                选择全部 {total} 条
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" onClick={clearSelection}>取消选择</Button>
+          </div>
+        </div>
+      ) : null}
       <Card>
-        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[140px_170px_150px_minmax(0,1fr)_auto]">
-          <Select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setSelected({});
-            }}
-            aria-label="按状态筛选"
-          >
-            <option value="">全部状态</option>
-            <option value="success">success</option>
-            <option value="failure">failure</option>
-            <option value="skipped">skipped</option>
-            <option value="cancelled">cancelled</option>
-          </Select>
-          <Select
-            value={emailDisableStatus}
-            onChange={(e) => {
-              setEmailDisableStatus(e.target.value);
-              setSelected({});
-            }}
-            aria-label="按邮箱停用状态筛选"
-          >
-            <option value="">全部停用状态</option>
-            <option value="success">已停用</option>
-            <option value="failed">停用失败</option>
-            <option value="skipped_cpa">CPA 未成功</option>
-            <option value="feature_disabled">功能关闭</option>
-            <option value="unsupported_source">非 accounts</option>
-            <option value="not_attempted">未执行</option>
-            <option value="not_applicable">不适用</option>
-          </Select>
-          <Select
-            value={botRiskFilter}
-            onChange={(e) => {
-              setBotRiskFilter(e.target.value);
-              setSelected({});
-            }}
-            aria-label="按风控标记筛选"
-          >
-            <option value="">不限</option>
-            <option value="1">风控标记</option>
-            <option value="0">正常账号</option>
-          </Select>
-          <div className="relative min-w-0 sm:col-span-2 lg:col-span-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input
-              className="pl-9"
-              type="search"
-              placeholder="搜索邮箱、服务商、失败原因或 Batch"
-              value={keyword}
+        <CardContent className="space-y-3 p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Select
+              value={status}
               onChange={(e) => {
-                setKeyword(e.target.value);
+                setStatus(e.target.value);
                 setSelected({});
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  setSelected({});
-                  void load(1, pageSize);
-                }
+              aria-label="按状态筛选"
+            >
+              <option value="">全部状态</option>
+              <option value="success">success</option>
+              <option value="failure">failure</option>
+              <option value="skipped">skipped</option>
+              <option value="cancelled">cancelled</option>
+            </Select>
+            <Select
+              value={emailDisableStatus}
+              onChange={(e) => {
+                setEmailDisableStatus(e.target.value);
+                setSelected({});
               }}
-              aria-label="搜索账号记录"
-            />
+              aria-label="按邮箱停用状态筛选"
+            >
+              <option value="">全部停用状态</option>
+              <option value="success">已停用</option>
+              <option value="failed">停用失败</option>
+              <option value="skipped_cpa">CPA 未成功</option>
+              <option value="feature_disabled">功能关闭</option>
+              <option value="unsupported_source">非 accounts</option>
+              <option value="not_attempted">未执行</option>
+              <option value="not_applicable">不适用</option>
+            </Select>
+            <Select
+              value={botRiskFilter}
+              onChange={(e) => {
+                setBotRiskFilter(e.target.value);
+                setSelected({});
+              }}
+              aria-label="按风控标记筛选"
+            >
+              <option value="">不限</option>
+              <option value="1">异常账号</option>
+              <option value="0">正常账号</option>
+              <option value="unknown">未检查 / 未知</option>
+            </Select>
           </div>
-          <Button
-            className="sm:col-span-2 lg:col-span-1"
-            onClick={() => {
-              setSelected({});
-              void load(1, pageSize);
-            }}
-            disabled={loading}
-          >
-            <Search className="h-4 w-4" aria-hidden="true" />
-            查询
-          </Button>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                className="pl-9"
+                type="search"
+                placeholder="搜索邮箱、服务商、失败原因或 Batch"
+                value={keyword}
+                onChange={(e) => {
+                  setKeyword(e.target.value);
+                  setSelected({});
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setSelected({});
+                    void load(1, pageSize);
+                  }
+                }}
+                aria-label="搜索账号记录"
+              />
+            </div>
+            <Button
+              onClick={() => {
+                setSelected({});
+                void load(1, pageSize);
+              }}
+              disabled={loading}
+            >
+              <Search className="h-4 w-4" aria-hidden="true" />
+              查询
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -1167,14 +1251,20 @@ export function AccountsPage() {
                 {selectedIds.length ? `，已选 ${selectedIds.length} 条` : ""}。
               </CardDescription>
             </div>
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 text-sm text-muted-foreground hover:bg-muted xl:hidden">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={(e) => toggleAll(e.target.checked)}
-              />
-              全选本页
-            </label>
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={(e) => toggleAll(e.target.checked)}
+                />
+                本页
+              </label>
+              <Button size="sm" variant="ghost" disabled={selectingAll || loading || !total} onClick={() => void selectAllFiltered()}>
+                {selectingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                全部 {total} 条
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {items.length === 0 ? (

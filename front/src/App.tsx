@@ -11,6 +11,7 @@ import { ReloginPage } from "@/pages/Relogin";
 import { ReloginHistoryPage } from "@/pages/ReloginHistory";
 import { CredentialsPage } from "@/pages/Credentials";
 import { ConfigFilePage } from "@/pages/ConfigFile";
+import { SsoCheckHistoryPage, SsoCheckPage } from "@/pages/SsoCheck";
 
 export default function App() {
   const [jobRunning, setJobRunning] = useState(false);
@@ -30,7 +31,14 @@ export default function App() {
     };
     window.addEventListener("grok-auth-required", onAuthRequired);
     window.addEventListener("grok-job-state", onJobState);
-    api.authMe().then((data) => setAuth(data)).catch(() => setAuth({ enabled: true, setup_required: false, authenticated: false })).finally(() => setAuthLoading(false));
+    api.authMe()
+      .then((data) => setAuth({
+        enabled: !!data.enabled,
+        setup_required: !!data.setup_required,
+        authenticated: !!data.authenticated,
+      }))
+      .catch(() => setAuth({ enabled: true, setup_required: false, authenticated: false }))
+      .finally(() => setAuthLoading(false));
     return () => {
       window.removeEventListener("grok-auth-required", onAuthRequired);
       window.removeEventListener("grok-job-state", onJobState);
@@ -83,6 +91,9 @@ export default function App() {
         <Route index element={<Navigate to="/overview" replace />} />
         <Route path="overview" element={<DashboardPage />} />
         <Route path="accounts" element={<AccountsPage />} />
+        <Route path="accounts/sso-check" element={<SsoCheckPage />} />
+        <Route path="accounts/sso-check/history" element={<SsoCheckHistoryPage />} />
+        <Route path="accounts/sso-check/history/:runId" element={<SsoCheckHistoryPage />} />
         <Route path="accounts/relogin" element={<ReloginPage />} />
         <Route path="accounts/relogin/history" element={<ReloginHistoryPage />} />
         <Route path="accounts/relogin/history/:runId" element={<ReloginHistoryPage />} />

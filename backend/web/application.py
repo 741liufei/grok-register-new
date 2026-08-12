@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from .account_exports import build_account_auth_archive, build_sso_archive, read_sso_token
 from .jobs import job_coordinator
 from .relogin_jobs import relogin_coordinator
+from .sso_check_jobs import sso_check_coordinator
 from backend.integrations.proxy import validate_http_proxy_url
 from backend.integrations import account_monitor
 from backend.shared.paths import DATA_ROOT, PROJECT_ROOT, STATIC_ROOT
@@ -38,7 +39,7 @@ WEB_SESSION_COOKIE = "grok_register_session"
 WEB_SESSION_TTL = 60 * 60 * 24 * 7
 WEB_AUTH_FILE = DATA_DIR / "web_auth.json"
 LEGACY_WEB_AUTH_FILE = APP_DIR / "web_auth.json"
-MAX_BATCH_ACCOUNT_IDS = 1000
+MAX_BATCH_ACCOUNT_IDS = 10000
 
 CONFIG_PUBLIC_KEYS = (
     "email_provider",
@@ -429,11 +430,9 @@ def _serialize_record(
     item["success"] = bool(item.get("success"))
     item["cpa_enabled"] = bool(item.get("cpa_enabled"))
     item["sso_saved"] = bool(item.get("sso_saved"))
-    item["bot_risk"] = bool(item.get("bot_risk"))
-    if item.get("bfs") is None:
-        item["bfs"] = ""
-    else:
-        item["bfs"] = str(item.get("bfs"))
+    bfs_text = "" if item.get("bfs") is None else str(item.get("bfs")).strip()
+    item["bfs"] = bfs_text
+    item["bot_risk"] = bool(item.get("bot_risk")) or bool(bfs_text and bfs_text != "0")
     raw_config = _gr().config
     from backend.integrations.grok2api_client import Grok2APIClient
 
@@ -444,11 +443,7 @@ def _serialize_record(
             item[f"{kind}_auth_available"] = True
         except (FileNotFoundError, OSError, ValueError):
             item[f"{kind}_auth_available"] = False
-    try:
-        _find_account_sso_file(item)
-        item["sso_available"] = True
-    except (FileNotFoundError, OSError, ValueError):
-        item["sso_available"] = False
+    item["sso_available"] = _account_has_sso(item)
     item["screenshot_url"] = (
         f"/api/accounts/{item.get('id')}/failure-screenshot"
         if str(item.get("screenshot_path") or "").strip()
@@ -644,6 +639,14 @@ def _find_account_sso_file(record: Dict[str, Any]) -> Path:
         if _path_within(path, [root]) and path.is_file():
             return path.resolve()
     raise FileNotFoundError("未找到该账号对应的 SSO 文件")
+
+
+def _account_has_sso(record: Dict[str, Any]) -> bool:
+    try:
+        read_sso_token(_find_account_sso_file(record))
+        return True
+    except (FileNotFoundError, OSError, TypeError, ValueError, UnicodeError):
+        return False
 
 
 def _load_account_sso(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -911,10 +914,101 @@ def create_app() -> FastAPI:
     def api_account_relogin_status() -> Dict[str, Any]:
         return {"ok": True, "relogin": relogin_coordinator.status()}
 
+    @app.get("/api/accounts/select-ids")
+    def api_account_select_ids(
+        status: str = Query(""),
+        email_disable_status: str = Query(""),
+        q: str = Query(""),
+        keyword: str = Query(""),
+        batch_id: str = Query(""),
+        bot_risk: str = Query(""),
+    ) -> Dict[str, Any]:
+        store = _gr().get_registration_repository()
+        ids = store.list_result_ids(
+            status=str(status or "").strip().lower(),
+            email_disable_status=str(email_disable_status or "").strip().lower(),
+            keyword=str(q or keyword or "").strip(),
+            batch_id=str(batch_id or "").strip(),
+            bot_risk=str(bot_risk or "").strip().lower(),
+        )
+        return {"ok": True, "ids": ids, "total": len(ids)}
+
+    @app.get("/api/accounts/actionable-ids")
+    def api_account_actionable_ids(
+        action: str = Query(...),
+        q: str = Query(""),
+        bot_risk: str = Query(""),
+    ) -> Dict[str, Any]:
+        normalized_action = str(action or "").strip().lower()
+        store = _gr().get_registration_repository()
+        try:
+            ids = store.list_actionable_result_ids(
+                normalized_action,
+                keyword=str(q or "").strip(),
+                bot_risk=str(bot_risk or "").strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if normalized_action == "sso_check":
+            records_by_id = {
+                int(record.get("id") or 0): record
+                for record in store.get_results_by_ids(ids)
+            }
+            ids = [
+                account_id
+                for account_id in ids
+                if account_id in records_by_id and _account_has_sso(records_by_id[account_id])
+            ]
+        return {"ok": True, "ids": ids, "total": len(ids)}
+
+    @app.get("/api/accounts/sso-check/status")
+    def api_account_sso_check_status() -> Dict[str, Any]:
+        return {"ok": True, "sso_check": sso_check_coordinator.status()}
+
+    @app.post("/api/accounts/sso-check/prepare")
+    def api_accounts_sso_check_prepare(body: AccountIdsBody) -> Dict[str, Any]:
+        ids = _batch_account_ids(body.ids)
+        gr = _gr()
+        records = gr.get_registration_repository().get_results_by_ids(ids)
+        records_by_id = {int(record.get("id") or 0): record for record in records}
+        prepared = [
+            account_id
+            for account_id in ids
+            if account_id in records_by_id and _account_has_sso(records_by_id[account_id])
+        ]
+        return {
+            "ok": True,
+            "ids": prepared,
+            "missing": [account_id for account_id in ids if account_id not in records_by_id],
+            "unavailable": [
+                account_id
+                for account_id in ids
+                if account_id in records_by_id and account_id not in prepared
+            ],
+        }
+
+    @app.post("/api/accounts/sso-check")
+    def api_accounts_sso_check(body: AccountIdsBody) -> Dict[str, Any]:
+        if job_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="注册任务运行中，请等待任务结束后检查")
+        if relogin_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="账号重新登录中，请等待完成后检查")
+        try:
+            status = sso_check_coordinator.start_many(_batch_account_ids(body.ids))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"ok": True, "sso_check": status}
+
     @app.post("/api/accounts/relogin")
     def api_accounts_relogin(body: AccountIdsBody) -> Dict[str, Any]:
         if job_coordinator.status().get("running"):
             raise HTTPException(status_code=409, detail="注册任务运行中，请等待任务结束后重新登录")
+        if sso_check_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="SSO 详细检查中，请等待完成后重新登录")
         try:
             status = relogin_coordinator.start_many(_batch_account_ids(body.ids))
         except LookupError as exc:
@@ -973,6 +1067,8 @@ def create_app() -> FastAPI:
     def api_account_relogin(account_id: int) -> Dict[str, Any]:
         if job_coordinator.status().get("running"):
             raise HTTPException(status_code=409, detail="注册任务运行中，请等待任务结束后重新登录")
+        if sso_check_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="SSO 详细检查中，请等待完成后重新登录")
         try:
             status = relogin_coordinator.start(account_id)
         except LookupError as exc:
@@ -1257,6 +1353,8 @@ def create_app() -> FastAPI:
     def api_job_start(body: StartJobBody) -> Dict[str, Any]:
         if relogin_coordinator.status().get("running"):
             raise HTTPException(status_code=409, detail="账号重新登录中，请等待完成后再启动注册")
+        if sso_check_coordinator.status().get("running"):
+            raise HTTPException(status_code=409, detail="SSO 详细检查中，请等待完成后再启动注册")
         gr = _gr()
         gr.load_config()
         if body.config:

@@ -152,6 +152,23 @@ class AccessTokenBotRiskTests(unittest.TestCase):
         self.assertEqual(item["sso_risk_check"]["bot_flag_source"], 0)
         self.assertEqual(item["sso_risk_check"]["verdict"], "clean")
 
+    def test_serialize_treats_any_nonzero_bfs_as_risk(self):
+        record = {"id": 1, "bot_risk": 0, "bfs": "4", "extra_json": "{}"}
+        with mock.patch.object(webapp, "_gr") as gr_mock:
+            gr_mock.return_value.config = {}
+            with (
+                mock.patch.object(webapp, "_find_account_auth_file", side_effect=FileNotFoundError),
+                mock.patch.object(webapp, "_find_account_sso_file", side_effect=FileNotFoundError),
+                mock.patch(
+                    "backend.integrations.grok2api_client.Grok2APIClient.is_configured",
+                    return_value=False,
+                ),
+            ):
+                item = webapp._serialize_record(record)
+
+        self.assertTrue(item["bot_risk"])
+        self.assertEqual(item["bfs"], "4")
+
     def test_migration_adds_bot_risk_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "results.sqlite3"

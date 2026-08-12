@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -180,14 +181,117 @@ class RegistrationRepositoryMigrationTests(unittest.TestCase):
                     "email": "safe@example.com",
                     "status": "success",
                     "bot_risk": False,
+                    "bfs": 0,
+                }
+            )
+            store.add_result(
+                {
+                    "email": "unknown@example.com",
+                    "status": "success",
+                    "bot_risk": False,
+                }
+            )
+            store.add_result(
+                {
+                    "email": "source-only-risk@example.com",
+                    "status": "success",
+                    "bot_risk": False,
+                    "bfs": 4,
+                }
+            )
+            store.add_result(
+                {
+                    "email": "legacy-clean@example.com",
+                    "status": "success",
+                    "bot_risk": False,
+                    "extra_json": json.dumps({"sso_check_status": "clean"}),
                 }
             )
             risk_rows = store.list_results(bot_risk="1")
-            self.assertEqual([row["email"] for row in risk_rows], ["risk@example.com"])
-            self.assertEqual(store.count_results(bot_risk="risk"), 1)
+            self.assertEqual(
+                [row["email"] for row in risk_rows],
+                ["source-only-risk@example.com", "risk@example.com"],
+            )
+            self.assertEqual(store.count_results(bot_risk="risk"), 2)
             safe_rows = store.list_results(bot_risk="0")
-            self.assertEqual([row["email"] for row in safe_rows], ["safe@example.com"])
-            self.assertEqual(store.count_results(bot_risk="normal"), 1)
+            self.assertEqual(
+                [row["email"] for row in safe_rows],
+                ["legacy-clean@example.com", "safe@example.com"],
+            )
+            self.assertEqual(store.count_results(bot_risk="normal"), 2)
+            unknown_rows = store.list_results(bot_risk="unknown")
+            self.assertEqual([row["email"] for row in unknown_rows], ["unknown@example.com"])
+
+    def test_list_result_ids_matches_filters_and_list_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RegistrationRepository(Path(tmp) / "results.sqlite3")
+            first = store.add_result(
+                {"email": "first@example.com", "status": "success", "provider": "fixture"}
+            )
+            second = store.add_result(
+                {"email": "second@example.com", "status": "failure", "provider": "fixture"}
+            )
+            third = store.add_result(
+                {"email": "third@example.com", "status": "success", "provider": "other"}
+            )
+
+            expected = [row["id"] for row in store.list_results(status="success", keyword="fixture")]
+            self.assertEqual(store.list_result_ids(status="success", keyword="fixture"), expected)
+            self.assertEqual(expected, [first])
+            self.assertNotIn(second, expected)
+            self.assertNotIn(third, expected)
+
+    def test_actionable_ids_apply_task_and_risk_filters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RegistrationRepository(Path(tmp) / "results.sqlite3")
+            safe = store.add_result(
+                {
+                    "email": "safe@example.com",
+                    "password": "secret",
+                    "status": "success",
+                    "sso_saved": True,
+                    "bot_risk": False,
+                    "bfs": 0,
+                    "auth_info": "batch-action-needle",
+                }
+            )
+            risky = store.add_result(
+                {
+                    "email": "risk@example.com",
+                    "password": "secret",
+                    "status": "success",
+                    "sso_saved": True,
+                    "bot_risk": True,
+                    "bfs": 2,
+                }
+            )
+            unknown = store.add_result(
+                {
+                    "email": "unknown@example.com",
+                    "password": "secret",
+                    "status": "success",
+                    "sso_saved": True,
+                    "bot_risk": False,
+                }
+            )
+            store.add_result(
+                {
+                    "email": "missing-password@example.com",
+                    "password": "",
+                    "status": "success",
+                    "sso_saved": True,
+                    "bot_risk": False,
+                }
+            )
+
+            self.assertEqual(store.list_actionable_result_ids("relogin", bot_risk="0"), [safe])
+            self.assertEqual(store.list_actionable_result_ids("sso_check", bot_risk="1"), [risky])
+            self.assertEqual(store.list_actionable_result_ids("relogin", bot_risk="unknown"), [unknown])
+            self.assertEqual(store.list_actionable_result_ids("sso_check", keyword="safe@"), [safe])
+            self.assertEqual(
+                store.list_actionable_result_ids("sso_check", keyword="batch-action-needle"),
+                [safe],
+            )
 
 
 if __name__ == "__main__":

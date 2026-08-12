@@ -71,7 +71,13 @@ class RegistrationRiskBotFlagTests(unittest.TestCase):
             "error": "",
         }
         original = dict(engine.config)
-        engine.config.update({"cpa_auto_add": True, "cpa_auth_dir": "data/cpa_auth"})
+        engine.config.update(
+            {
+                "cpa_auto_add": True,
+                "cpa_auth_dir": "data/cpa_auth",
+                "sso_detailed_risk_check": False,
+            }
+        )
         try:
             with (
                 mock.patch.object(

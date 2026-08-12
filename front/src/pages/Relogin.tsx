@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, History, Loader2, RefreshCcw, Search, ShieldAlert, XCircle } from "lucide-react";
 import { AccountEmailLabel } from "@/components/AccountEmailIcon";
-import { Badge, Button, Card, EmptyState, Input, PageHeader, PaginationBar, Toast } from "@/components/ui";
+import { AccountPageContext } from "@/components/AccountPageContext";
+import { Badge, Button, Card, EmptyState, Input, PageHeader, PaginationBar, Select, Toast } from "@/components/ui";
 import { api, type AccountRecord, type ReloginStatus } from "@/lib/api";
 import { appendReloginHistory } from "@/lib/reloginHistory";
 
@@ -10,11 +11,14 @@ export function ReloginPage() {
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [query, setQuery] = useState("");
+  const [riskFilter, setRiskFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [ssoCheckRunning, setSsoCheckRunning] = useState(false);
   const [status, setStatus] = useState<ReloginStatus | null>(null);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
   const recordedRun = useRef("");
@@ -27,7 +31,12 @@ export function ReloginPage() {
   const loadAccounts = async (targetPage = page, targetQuery = query, targetPageSize = pageSize) => {
     setLoading(true);
     try {
-      const result = await api.accounts({ limit: targetPageSize, offset: (targetPage - 1) * targetPageSize, q: targetQuery.trim() });
+      const result = await api.accounts({
+        limit: targetPageSize,
+        offset: (targetPage - 1) * targetPageSize,
+        q: targetQuery.trim(),
+        botRisk: riskFilter || undefined,
+      });
       setAccounts(result.items || []);
       setTotal(Number(result.total ?? result.items?.length ?? 0));
       setPage(targetPage);
@@ -44,7 +53,7 @@ export function ReloginPage() {
       void loadAccounts(1, query);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, riskFilter]);
 
   useEffect(() => {
     let active = true;
@@ -75,6 +84,26 @@ export function ReloginPage() {
     };
   }, [status?.running]);
 
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const result = await api.ssoCheckStatus();
+        if (!active) return;
+        setSsoCheckRunning(!!result.sso_check.running);
+        if (result.sso_check.running) timer = window.setTimeout(poll, 2500);
+      } catch {
+        if (active) timer = window.setTimeout(poll, 5000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
   const candidates = accounts;
   const eligibleCandidates = candidates.filter((item) => !!item.email && !!item.password);
   const selectedIds = Object.entries(selected).filter(([, value]) => value).map(([id]) => Number(id));
@@ -103,12 +132,27 @@ export function ReloginPage() {
     }
   };
 
+  const selectAllMatchingAccounts = async () => {
+    setSelectingAll(true);
+    try {
+      const result = await api.actionableAccountIds("relogin", query.trim(), riskFilter);
+      const ids = result.ids || [];
+      setSelected(Object.fromEntries(ids.map((id) => [id, true])));
+      notify(`已选择 ${ids.length} 个可重新登录账号`, "success");
+    } catch (error: any) {
+      notify(error.message || "选择全部账号失败", "error");
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
   const progress = status?.total_count
     ? Math.min(100, Math.round((status.completed_count / status.total_count) * 100))
     : 0;
 
   return (
     <div className="space-y-5">
+      <AccountPageContext crumbs={[{ label: "重新登录" }]} />
       <PageHeader
         title="重新登录"
         description="集中选择已有账号，通过保存的邮箱和密码刷新 SSO、CPA 与 Grok2API 授权文件。"
@@ -177,16 +221,23 @@ export function ReloginPage() {
               <h2 className="font-semibold text-slate-950">选择账号</h2>
               <p className="mt-1 text-xs text-slate-500">共 {total} 个账号；缺少邮箱或密码的记录会显示但不可选择。</p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="grid gap-2 sm:grid-cols-[150px_minmax(220px,1fr)_auto]">
+              <Select value={riskFilter} onChange={(event) => { setRiskFilter(event.target.value); setSelected({}); }} aria-label="按账号风控状态筛选">
+                <option value="">全部账号</option>
+                <option value="0">正常账号</option>
+                <option value="1">异常账号</option>
+                <option value="unknown">未检查 / 未知</option>
+              </Select>
               <div className="relative min-w-0 sm:w-72">
                 <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" aria-hidden="true" />
                 <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索邮箱或服务商" className="pl-9" />
               </div>
-              <Button onClick={() => void start()} disabled={!selectedIds.length || starting || !!status?.running}>
+              <Button onClick={() => void start()} disabled={!selectedIds.length || starting || !!status?.running || ssoCheckRunning}>
                 {starting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCcw className="h-4 w-4" aria-hidden="true" />}
                 重新登录 {selectedIds.length ? `(${selectedIds.length})` : ""}
               </Button>
             </div>
+            {ssoCheckRunning ? <p className="text-xs text-amber-700 lg:text-right">SSO 风控检查正在运行，完成后可启动重新登录。</p> : null}
           </div>
         </div>
 
@@ -196,25 +247,36 @@ export function ReloginPage() {
           </div>
         ) : candidates.length ? (
           <>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-600">
+              <label className="flex min-h-9 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setSelected((previous) => {
+                      const next = { ...previous };
+                      for (const item of eligibleCandidates) checked ? (next[item.id] = true) : delete next[item.id];
+                      return next;
+                    });
+                  }}
+                />
+                选择本页
+              </label>
+              <div className="flex items-center gap-2">
+                <span>已选 {selectedIds.length}</span>
+                <Button size="sm" variant="ghost" disabled={selectingAll || !total} onClick={() => void selectAllMatchingAccounts()}>
+                  {selectingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                  选择全部结果
+                </Button>
+                {selectedIds.length ? <Button size="sm" variant="ghost" onClick={() => setSelected({})}>取消</Button> : null}
+              </div>
+            </div>
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
                   <tr>
-                    <th className="w-12 px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setSelected((previous) => {
-                            const next = { ...previous };
-                            for (const item of eligibleCandidates) checked ? (next[item.id] = true) : delete next[item.id];
-                            return next;
-                          });
-                        }}
-                        aria-label="选择全部账号"
-                      />
-                    </th>
+                    <th className="w-12 px-4 py-3"><span className="sr-only">选择账号</span></th>
                     <th className="px-4 py-3 font-medium">账号</th>
                     <th className="px-4 py-3 font-medium">服务商</th>
                     <th className="px-4 py-3 font-medium">CPA</th>

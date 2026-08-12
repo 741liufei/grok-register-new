@@ -13,6 +13,7 @@ from backend.web import application
 from backend.web.application import (
     MAX_BATCH_ACCOUNT_IDS,
     _batch_account_ids,
+    _account_has_sso,
     _find_account_auth_file,
     _find_account_sso_file,
     _load_account_auth_json,
@@ -134,6 +135,19 @@ class WebAuthJsonTests(unittest.TestCase):
             outside.write_text("email----password----token", encoding="utf-8")
             with self.assertRaises(FileNotFoundError):
                 _find_account_sso_file({"account_file": str(outside)})
+
+    def test_account_has_sso_requires_a_parseable_token(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(application, "DATA_DIR", Path(tmp)):
+            root = Path(tmp) / "accounts"
+            root.mkdir()
+            valid = root / "valid@example.com.txt"
+            invalid = root / "invalid@example.com.txt"
+            valid.write_text("valid@example.com----password----token", encoding="utf-8")
+            invalid.write_text("invalid@example.com----password----", encoding="utf-8")
+
+            self.assertTrue(_account_has_sso({"account_file": str(valid)}))
+            self.assertFalse(_account_has_sso({"account_file": str(invalid)}))
+            self.assertFalse(_account_has_sso({"account_file": str(root / "missing.txt")}))
 
 
 if __name__ == "__main__":

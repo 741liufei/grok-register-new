@@ -550,9 +550,24 @@ class RegistrationRepository:
             params.append(normalized_batch_id)
         normalized_bot_risk = str(bot_risk or "").strip().lower()
         if normalized_bot_risk in {"1", "true", "yes", "risk", "bot", "bot_risk"}:
-            clauses.append("bot_risk = 1")
+            clauses.append(
+                "(COALESCE(bot_risk, 0) = 1 OR "
+                "(trim(COALESCE(bfs, '')) <> '' AND trim(COALESCE(bfs, '')) <> '0'))"
+            )
         elif normalized_bot_risk in {"0", "false", "no", "normal", "safe"}:
-            clauses.append("COALESCE(bot_risk, 0) = 0")
+            clauses.append(
+                "COALESCE(bot_risk, 0) = 0 AND ("
+                "trim(COALESCE(bfs, '')) = '0' OR "
+                "(trim(COALESCE(bfs, '')) = '' AND "
+                "json_extract(CASE WHEN json_valid(extra_json) THEN extra_json ELSE '{}' END, "
+                "'$.sso_check_status') = 'clean'))"
+            )
+        elif normalized_bot_risk in {"unknown", "unchecked", "pending"}:
+            clauses.append(
+                "COALESCE(bot_risk, 0) = 0 AND trim(COALESCE(bfs, '')) = '' AND "
+                "COALESCE(json_extract(CASE WHEN json_valid(extra_json) THEN extra_json ELSE '{}' END, "
+                "'$.sso_check_status'), '') <> 'clean'"
+            )
         normalized_keyword = str(keyword or "").strip()
         if normalized_keyword:
             like = f"%{normalized_keyword}%"
@@ -620,6 +635,61 @@ class RegistrationRepository:
                 f"SELECT COUNT(*) AS total FROM registration_results {where}", params
             ).fetchone()
         return int(row["total"] or 0)
+
+    def list_result_ids(
+        self,
+        *,
+        status: str = "",
+        email_disable_status: str = "",
+        keyword: str = "",
+        batch_id: str = "",
+        bot_risk: str = "",
+    ) -> List[int]:
+        """返回与账号列表相同筛选条件下的全部主键，顺序与列表一致。"""
+        where, params = self._result_filters(
+            status=status,
+            email_disable_status=email_disable_status,
+            keyword=keyword,
+            batch_id=batch_id,
+            bot_risk=bot_risk,
+        )
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id
+                FROM registration_results
+                {where}
+                ORDER BY finished_at DESC, id DESC
+                """,
+                params,
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def list_actionable_result_ids(
+        self,
+        action: str,
+        *,
+        keyword: str = "",
+        bot_risk: str = "",
+    ) -> List[int]:
+        """返回任务页面中符合搜索条件且可执行指定操作的全部账号主键。"""
+        normalized_action = str(action or "").strip().lower()
+        if normalized_action not in {"relogin", "sso_check"}:
+            raise ValueError("action 必须是 relogin 或 sso_check")
+        where, params = self._result_filters(keyword=keyword, bot_risk=bot_risk)
+        clauses = []
+        if normalized_action == "relogin":
+            clauses.extend(["trim(COALESCE(email, '')) <> ''", "trim(COALESCE(password, '')) <> ''"])
+        else:
+            clauses.extend(["trim(COALESCE(email, '')) <> ''", "COALESCE(sso_saved, 0) = 1"])
+        actionable = " AND ".join(clauses)
+        where = f"{where} AND {actionable}" if where else f"WHERE {actionable}"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM registration_results {where} ORDER BY finished_at DESC, id DESC",
+                params,
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
 
     def get_results_by_ids(self, ids: Iterable[int | str]) -> List[Dict[str, Any]]:
         """按主键批量读取记录，保持传入顺序。"""
@@ -763,6 +833,67 @@ class RegistrationRepository:
                 )
                 if relogin_status == "success" and not screenshot_path:
                     assignments.append("screenshot_path = ''")
+            cursor = conn.execute(
+                f"UPDATE registration_results SET {', '.join(assignments)} WHERE id = :id",
+                values,
+            )
+            return bool(cursor.rowcount)
+
+    def update_sso_check_result(
+        self,
+        account_id: int,
+        *,
+        risk_state: Dict[str, Any],
+        status: str,
+    ) -> bool:
+        """保存一次 SSO 详细检查结果；仅明确结论同步 bot_risk / bfs。"""
+        try:
+            normalized_id = int(account_id)
+        except (TypeError, ValueError):
+            return False
+        if normalized_id <= 0:
+            return False
+        state = dict(risk_state or {})
+        bot_flag = state.get("bot_flag") if isinstance(state.get("bot_flag"), dict) else {}
+        source = state.get("bot_flag_source", bot_flag.get("source"))
+        normalized_status = str(status or "unknown").strip().lower() or "unknown"
+        now = self.now_text()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT extra_json FROM registration_results WHERE id = ?",
+                (normalized_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                extra = json.loads(str(row["extra_json"] or "{}"))
+                if not isinstance(extra, dict):
+                    extra = {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                extra = {}
+            extra.update(
+                {
+                    "sso_risk_check": state,
+                    "sso_check_status": normalized_status,
+                    "sso_check_at": now,
+                }
+            )
+            assignments = ["extra_json = :extra_json"]
+            values: Dict[str, Any] = {
+                "extra_json": json.dumps(extra, ensure_ascii=False, sort_keys=True),
+                "id": normalized_id,
+            }
+            # 未知或请求失败不能证明账号已经恢复正常，保留此前明确的风险结论。
+            if normalized_status in {"clean", "flagged"}:
+                assignments.append("bot_risk = :bot_risk")
+                values.update(
+                    {
+                        "bot_risk": 1 if normalized_status == "flagged" else 0,
+                    }
+                )
+                if source is not None and str(source).strip() != "":
+                    assignments.append("bfs = :bfs")
+                    values["bfs"] = str(source)
             cursor = conn.execute(
                 f"UPDATE registration_results SET {', '.join(assignments)} WHERE id = :id",
                 values,
