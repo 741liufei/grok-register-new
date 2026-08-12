@@ -1388,6 +1388,12 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
     # Sub2API：默认关闭，需显式开启；失败不拉低注册成功判定
     sub2api_enabled = bool(config.get("sub2api_enabled", False))
     sub2api_configured = _sub2api.Sub2APIClient.is_configured(config)
+    if not sub2api_enabled:
+        sub2api_status = "disabled"
+    elif sub2api_configured:
+        sub2api_status = "ready"
+    else:
+        sub2api_status = "not_configured"
     _set_result(
         enabled=cpa_enabled,
         status="not_attempted" if cpa_enabled else "disabled",
@@ -1402,11 +1408,7 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
         grok2api_remote_status="not_configured",
         grok2api_remote_imported_at="",
         grok2api_remote_error="",
-        sub2api_remote_status=(
-            "disabled"
-            if not sub2api_enabled
-            else ("ready" if sub2api_configured else "not_configured")
-        ),
+        sub2api_remote_status=sub2api_status,
         sub2api_remote_imported_at="",
         sub2api_remote_error="",
         sub2api_remote_result=None,
@@ -1651,18 +1653,6 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                 group_ids = _sub2api.Sub2APIClient.parse_group_ids(
                     config.get("sub2api_group_ids", "")
                 )
-                try:
-                    proxy_id = int(config.get("sub2api_proxy_id", 0) or 0)
-                except (TypeError, ValueError):
-                    proxy_id = 0
-                try:
-                    concurrency = int(config.get("sub2api_concurrency", 1) or 1)
-                except (TypeError, ValueError):
-                    concurrency = 1
-                try:
-                    priority = int(config.get("sub2api_priority", 0) or 0)
-                except (TypeError, ValueError):
-                    priority = 0
                 _cpa_log(
                     "[Sub2API] 远程上传网络: 直连 -> "
                     f"{str(config.get('sub2api_remote_url') or '').rstrip('/')}"
@@ -1671,10 +1661,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                     remote_result = sub2_client.sso_to_oauth(
                         [sso],
                         name=name_prefix,
-                        proxy_id=proxy_id,
+                        proxy_id=config.get("sub2api_proxy_id", 0),
                         group_ids=group_ids,
-                        concurrency=concurrency,
-                        priority=priority,
+                        concurrency=config.get("sub2api_concurrency", 1),
+                        priority=config.get("sub2api_priority", 0),
                     )
                 created = remote_result.get("created") or []
                 failed = remote_result.get("failed") or []

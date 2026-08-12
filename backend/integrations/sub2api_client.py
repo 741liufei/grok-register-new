@@ -124,7 +124,7 @@ class Sub2APIClient:
             proxy_value = 0
         if proxy_value > 0:
             body["proxy_id"] = proxy_value
-        groups = [int(item) for item in (group_ids or []) if int(item) > 0]
+        groups = [value for value in map(int, group_ids or []) if value > 0]
         if groups:
             body["group_ids"] = groups
         try:
@@ -176,8 +176,8 @@ class Sub2APIClient:
 
         # 兼容 data 包裹或顶层 created/failed
         data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-        created = data.get("created") if isinstance(data, dict) else None
-        failed = data.get("failed") if isinstance(data, dict) else None
+        created = data.get("created")
+        failed = data.get("failed")
         return {
             "created": created if isinstance(created, list) else (created or []),
             "failed": failed if isinstance(failed, list) else (failed or []),

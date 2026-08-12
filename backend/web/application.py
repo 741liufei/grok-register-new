@@ -410,7 +410,7 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "cloudflare_api_base",
         ):
             value = proxy_update if key == "proxy" else str(value or "").strip()
-            if key in ("sub2api_remote_url",):
+            if key == "sub2api_remote_url":
                 value = value.rstrip("/")
                 if value and not value.startswith(("http://", "https://")):
                     raise HTTPException(
