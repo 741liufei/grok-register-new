@@ -51,6 +51,14 @@ class ProxyConfigUpdateTests(unittest.TestCase):
         self.assertEqual(result["config"]["proxy"], proxy)
         save.assert_called_once_with()
 
+    def test_schemeless_http_proxy_is_saved_with_default_scheme(self):
+        with patch.object(gr, "load_config"), patch.object(gr, "save_config") as save:
+            result = _apply_config_updates({"proxy": "127.0.0.1:7897"})
+
+        self.assertEqual(gr.config["proxy"], "http://127.0.0.1:7897")
+        self.assertEqual(result["config"]["proxy"], "http://127.0.0.1:7897")
+        save.assert_called_once_with()
+
     def test_invalid_http_proxy_is_rejected_before_saving(self):
         with patch.object(gr, "load_config"), patch.object(gr, "save_config") as save:
             with self.assertRaises(HTTPException) as raised:

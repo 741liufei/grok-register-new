@@ -304,6 +304,8 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
     proxy_update: Optional[str] = None
     if "proxy" in updates:
         proxy_update = str(updates.get("proxy") or "").strip()
+        if proxy_update and "://" not in proxy_update:
+            proxy_update = f"http://{proxy_update}"
         if proxy_update.lower().startswith(("http:", "https:")):
             try:
                 proxy_update = validate_http_proxy_url(proxy_update)

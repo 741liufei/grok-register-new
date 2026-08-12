@@ -11,6 +11,22 @@ from backend.integrations.proxy import (
 
 
 class DockerProxyResolutionTests(unittest.TestCase):
+    def test_schemeless_local_proxy_is_normalized_and_mapped(self):
+        with mock.patch.dict(
+            "os.environ", {"GROK_DOCKER_PROXY_HOST": "host.docker.internal"}, clear=False
+        ):
+            self.assertEqual(
+                resolve_proxy_url("127.0.0.1:7897"),
+                "http://host.docker.internal:7897",
+            )
+
+    def test_schemeless_proxy_is_normalized_without_docker_host(self):
+        with mock.patch.dict("os.environ", {"GROK_DOCKER_PROXY_HOST": ""}, clear=False):
+            self.assertEqual(
+                resolve_proxy_url("proxy.example.com:7897"),
+                "http://proxy.example.com:7897",
+            )
+
     def test_localhost_proxy_maps_to_docker_host(self):
         with mock.patch.dict(
             "os.environ", {"GROK_DOCKER_PROXY_HOST": "host.docker.internal"}, clear=False

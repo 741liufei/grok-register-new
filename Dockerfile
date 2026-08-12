@@ -9,12 +9,23 @@ RUN npm run build
 
 FROM ubuntu:24.04 AS python-builder
 ARG DEBIAN_FRONTEND=noninteractive
+ARG UBUNTU_MIRROR=http://mirrors.aliyun.com/ubuntu
+ARG CAMOUFOX_VERSION=152.0.4
+ARG CAMOUFOX_BUILD=beta.28
+ARG CAMOUFOX_ASSET_URL=https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.28/camoufox-152.0.4-beta.28-lin.x86_64.zip
+ARG CAMOUFOX_ASSET_SHA256=924f3109ccd6d47cd6a0384d67a345fadf975d48b6319f8dbbd5954c588982bd
+ARG CAMOUFOX_ASSET_SIZE=663387175
 ENV PATH=/opt/venv/bin:$PATH \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     XDG_CACHE_HOME=/opt/camoufox-cache
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        -e "s|http://security.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         ca-certificates python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,14 +35,23 @@ RUN python3 -m venv /opt/venv \
     && pip install --upgrade pip \
     && pip install -r requirements.txt
 
-# 浏览器引擎直接内置到镜像，容器首次启动时不再临时下载。
-RUN python -m camoufox fetch \
+# Pin the browser asset and bypass GitHub's rate-limited releases API. The
+# installer verifies both size and SHA-256, then launch_path provides a hard
+# build failure if the executable is not present.
+COPY docker/install_camoufox.py ./docker/install_camoufox.py
+RUN python ./docker/install_camoufox.py \
+        --version "$CAMOUFOX_VERSION" \
+        --build "$CAMOUFOX_BUILD" \
+        --url "$CAMOUFOX_ASSET_URL" \
+        --sha256 "$CAMOUFOX_ASSET_SHA256" \
+        --size "$CAMOUFOX_ASSET_SIZE" \
     && python -m camoufox version
 
 FROM ubuntu:24.04 AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APP_UID=10001
 ARG APP_GID=10001
+ARG UBUNTU_MIRROR=http://mirrors.aliyun.com/ubuntu
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
@@ -45,7 +65,12 @@ ENV PATH=/opt/venv/bin:$PATH \
     GROK_FORCE_HEADED=1
 
 # Camoufox/Firefox 有头模式依赖 + Xvfb 虚拟显示器。
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        -e "s|http://security.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         ca-certificates dumb-init gosu procps python3 xvfb xauth \
         libasound2t64 libatk1.0-0t64 libavcodec60 \
         libcairo-gobject2 libcairo2 libdbus-1-3 \
@@ -67,6 +92,10 @@ COPY --chown=app:app config.example.json requirements.txt ./
 COPY --chown=app:app --from=frontend-builder /build/front/dist ./front/dist/
 COPY --chown=app:app --chmod=755 docker/entrypoint.sh ./docker/entrypoint.sh
 COPY --chown=app:app docker/camoufox_smoke.py ./docker/camoufox_smoke.py
+
+# Keep the Linux entrypoint executable even when the build context came from a
+# Windows checkout with CRLF line endings.
+RUN sed -i 's/\r$//' ./docker/entrypoint.sh
 
 RUN install -d -o app -g app /app/data /app/logs
 

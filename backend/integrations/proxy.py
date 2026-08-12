@@ -131,24 +131,39 @@ def redact_proxy_text(value: object) -> str:
 
 
 def resolve_proxy_url(proxy_url: str) -> str:
-    """Replace a local proxy host with the Docker host alias when configured."""
+    """Normalize a proxy URL and replace local hosts with the Docker alias.
+
+    The settings UI historically accepted ``host:port`` without a scheme.
+    HTTP clients interpret that form inconsistently (``urlparse`` can treat
+    the host as a scheme), so canonicalize it to an HTTP proxy URL before
+    passing it to requests, curl-cffi, or Camoufox.
+    """
     value = str(proxy_url or "").strip()
-    docker_host = str(os.environ.get("GROK_DOCKER_PROXY_HOST", "") or "").strip()
-    if not value or not docker_host:
+    if not value:
         return value
 
+    docker_host = str(os.environ.get("GROK_DOCKER_PROXY_HOST", "") or "").strip()
     has_scheme = "://" in value
+    normalized = value if has_scheme else f"http://{value}"
     try:
-        parsed = urlsplit(value if has_scheme else f"http://{value}")
+        parsed = urlsplit(normalized)
         parsed.port
     except ValueError:
         return value
-    if (parsed.hostname or "").lower() not in LOCAL_PROXY_HOSTS:
+    if not parsed.hostname:
         return value
 
-    auth = parsed.netloc.rsplit("@", 1)[0] + "@" if "@" in parsed.netloc else ""
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    resolved = urlunsplit(
-        (parsed.scheme, f"{auth}{docker_host}{port}", parsed.path, parsed.query, parsed.fragment)
-    )
-    return resolved if has_scheme else resolved.split("://", 1)[1]
+    if docker_host and (parsed.hostname or "").lower() in LOCAL_PROXY_HOSTS:
+        auth = parsed.netloc.rsplit("@", 1)[0] + "@" if "@" in parsed.netloc else ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        normalized = urlunsplit(
+            (
+                parsed.scheme,
+                f"{auth}{docker_host}{port}",
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    return normalized
