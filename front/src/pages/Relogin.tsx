@@ -1,11 +1,123 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, History, Loader2, RefreshCcw, Search, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, History, ListChecks, Loader2, RefreshCcw, Search, ShieldAlert, X, XCircle } from "lucide-react";
 import { AccountEmailLabel } from "@/components/AccountEmailIcon";
 import { AccountPageContext } from "@/components/AccountPageContext";
 import { Badge, Button, Card, EmptyState, Input, PageHeader, PaginationBar, Select, Toast } from "@/components/ui";
-import { api, type AccountRecord, type ReloginStatus } from "@/lib/api";
+import { api, type AccountRecord, type ReloginItem, type ReloginStatus } from "@/lib/api";
 import { appendReloginHistory } from "@/lib/reloginHistory";
+
+const RELOGIN_RESULT_PAGE_SIZE = 20;
+
+function ReloginResultList({
+  items,
+  botRiskByAccountId,
+}: {
+  items: ReloginItem[];
+  botRiskByAccountId: ReadonlyMap<number, boolean>;
+}) {
+  return (
+    <div className="divide-y divide-slate-100">
+      {items.map((item) => (
+        <div key={item.account_id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+          {item.status === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> : item.status === "failed" ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-400" aria-hidden="true" />}
+          <div className="min-w-0 flex-1">
+            <AccountEmailLabel
+              email={item.email || `账号 #${item.account_id}`}
+              botRisk={!!botRiskByAccountId.get(item.account_id)}
+              emailClassName="text-sm text-slate-900"
+            />
+            {botRiskByAccountId.get(item.account_id) ? (
+              <div className="mt-1">
+                <Badge variant="warning">
+                  <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
+                  风控标记
+                </Badge>
+              </div>
+            ) : null}
+            {item.error ? <div className="mt-1 break-all text-xs text-red-700">{item.error}</div> : null}
+            {item.status === "failed" && (item.stage || item.error_type || item.url) ? (
+              <div className="mt-2 space-y-1 rounded-lg bg-red-50 p-2 text-xs text-slate-600">
+                {item.stage ? <div><strong className="text-slate-800">阶段：</strong>{item.stage}</div> : null}
+                {item.error_type ? <div><strong className="text-slate-800">类型：</strong>{item.error_type}</div> : null}
+                {item.url ? <div className="break-all"><strong className="text-slate-800">页面：</strong>{item.url}</div> : null}
+                {item.screenshot_url ? <div className="flex flex-wrap items-center gap-2"><a href={item.screenshot_url} target="_blank" rel="noreferrer" className="font-medium text-sky-600 hover:underline">查看失败截图</a>{item.captured_at ? <span className="text-slate-400">{new Date(item.captured_at).toLocaleString()}</span> : null}</div> : null}
+              </div>
+            ) : null}
+          </div>
+          <Badge variant={item.status === "success" ? "success" : item.status === "failed" ? "destructive" : "secondary"}>{item.status === "success" ? "成功" : item.status === "failed" ? "失败" : "等待"}</Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReloginResultsDrawer({
+  status,
+  items,
+  page,
+  botRiskByAccountId,
+  onPageChange,
+  onClose,
+}: {
+  status: ReloginStatus;
+  items: ReloginItem[];
+  page: number;
+  botRiskByAccountId: ReadonlyMap<number, boolean>;
+  onPageChange: (page: number) => void;
+  onClose: () => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(status.items.length / RELOGIN_RESULT_PAGE_SIZE));
+  return (
+    <div className="fixed inset-0 z-[100] flex justify-end">
+      <button
+        type="button"
+        tabIndex={-1}
+        className="absolute inset-0 bg-slate-950/45"
+        aria-label="关闭本次重新登录结果"
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="relogin-results-title"
+        aria-describedby="relogin-results-description"
+        className="relative flex h-full w-full max-w-4xl flex-col border-l border-slate-200 bg-white shadow-2xl"
+      >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="relogin-results-title" className="font-semibold text-slate-950">本次重新登录结果</h2>
+              <Badge variant={status.running ? "default" : "success"}>{status.running ? "执行中" : "已完成"}</Badge>
+            </div>
+            <p id="relogin-results-description" className="mt-1 text-xs text-slate-500">
+              共 {status.items.length} 个账号 · 每页 20 条 · 第 {page} / {totalPages} 页
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Badge variant="secondary">已完成 {status.completed_count}</Badge>
+              <Badge variant="success">成功 {status.success_count}</Badge>
+              <Badge variant="destructive">失败 {status.failed_count}</Badge>
+            </div>
+          </div>
+          <Button size="icon" variant="ghost" className="shrink-0" onClick={onClose} aria-label="关闭本次重新登录结果">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ReloginResultList items={items} botRiskByAccountId={botRiskByAccountId} />
+        </div>
+        <div className="shrink-0 bg-white pb-[env(safe-area-inset-bottom)]">
+          <PaginationBar
+            page={page}
+            pageSize={RELOGIN_RESULT_PAGE_SIZE}
+            total={status.items.length}
+            onPageChange={onPageChange}
+          />
+        </div>
+      </aside>
+    </div>
+  );
+}
 
 export function ReloginPage() {
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
@@ -20,6 +132,8 @@ export function ReloginPage() {
   const [starting, setStarting] = useState(false);
   const [ssoCheckRunning, setSsoCheckRunning] = useState(false);
   const [status, setStatus] = useState<ReloginStatus | null>(null);
+  const [resultPage, setResultPage] = useState(1);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
   const recordedRun = useRef("");
 
@@ -104,6 +218,24 @@ export function ReloginPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setResultPage(1);
+  }, [status?.run_id]);
+
+  useEffect(() => {
+    if (!resultsOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResultsOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [resultsOpen]);
+
   const candidates = accounts;
   const eligibleCandidates = candidates.filter((item) => !!item.email && !!item.password);
   const selectedIds = Object.entries(selected).filter(([, value]) => value).map(([id]) => Number(id));
@@ -123,6 +255,7 @@ export function ReloginPage() {
     try {
       const result = await api.startBatchRelogin(selectedIds);
       recordedRun.current = "";
+      setResultsOpen(false);
       setStatus(result.relogin);
       notify("重新登录任务已启动", "success");
     } catch (error: any) {
@@ -149,6 +282,9 @@ export function ReloginPage() {
   const progress = status?.total_count
     ? Math.min(100, Math.round((status.completed_count / status.total_count) * 100))
     : 0;
+  const visibleResults = status?.items || [];
+  const safeResultPage = Math.min(resultPage, Math.max(1, Math.ceil(visibleResults.length / RELOGIN_RESULT_PAGE_SIZE)));
+  const pagedResults = visibleResults.slice((safeResultPage - 1) * RELOGIN_RESULT_PAGE_SIZE, safeResultPage * RELOGIN_RESULT_PAGE_SIZE);
 
   return (
     <div className="space-y-5">
@@ -156,7 +292,11 @@ export function ReloginPage() {
       <PageHeader
         title="重新登录"
         description="集中选择已有账号，通过保存的邮箱和密码刷新 SSO、CPA 与 Grok2API 授权文件。"
-        actions={
+        actions={<>
+          <Button variant="outline" disabled={!visibleResults.length} onClick={() => setResultsOpen(true)}>
+            <ListChecks className="h-4 w-4" aria-hidden="true" />
+            本次结果{visibleResults.length ? ` (${status?.completed_count || 0}/${status?.total_count || visibleResults.length})` : ""}
+          </Button>
           <Link
             to="/accounts/relogin/history"
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -164,7 +304,7 @@ export function ReloginPage() {
             <History className="h-4 w-4" aria-hidden="true" />
             登录历史
           </Link>
-        }
+        </>}
       />
 
       {status?.running ? (
@@ -358,43 +498,7 @@ export function ReloginPage() {
         ) : null}
       </Card>
 
-      {status?.items?.length ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-slate-200 px-4 py-4 sm:px-5"><h2 className="font-semibold text-slate-950">本次执行明细</h2></div>
-          <div className="divide-y divide-slate-100">
-            {status.items.map((item) => (
-              <div key={item.account_id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
-                {item.status === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : item.status === "failed" ? <XCircle className="mt-0.5 h-4 w-4 text-red-600" /> : <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-slate-400" />}
-                <div className="min-w-0 flex-1">
-                  <AccountEmailLabel
-                    email={item.email || `账号 #${item.account_id}`}
-                    botRisk={!!botRiskByAccountId.get(item.account_id)}
-                    emailClassName="text-sm text-slate-900"
-                  />
-                  {botRiskByAccountId.get(item.account_id) ? (
-                    <div className="mt-1">
-                      <Badge variant="warning">
-                        <ShieldAlert className="mr-1 h-3 w-3" aria-hidden="true" />
-                        风控标记
-                      </Badge>
-                    </div>
-                  ) : null}
-                  {item.error ? <div className="mt-1 break-all text-xs text-red-700">{item.error}</div> : null}
-                  {item.status === "failed" && (item.stage || item.error_type || item.url) ? (
-                    <div className="mt-2 space-y-1 rounded-lg bg-red-50 p-2 text-xs text-slate-600">
-                      {item.stage ? <div><strong className="text-slate-800">阶段：</strong>{item.stage}</div> : null}
-                      {item.error_type ? <div><strong className="text-slate-800">类型：</strong>{item.error_type}</div> : null}
-                      {item.url ? <div className="break-all"><strong className="text-slate-800">页面：</strong>{item.url}</div> : null}
-                      {item.screenshot_url ? <div className="flex flex-wrap items-center gap-2"><a href={item.screenshot_url} target="_blank" rel="noreferrer" className="font-medium text-sky-600 hover:underline">查看失败截图</a>{item.captured_at ? <span className="text-slate-400">{new Date(item.captured_at).toLocaleString()}</span> : null}</div> : null}
-                    </div>
-                  ) : null}
-                </div>
-                <Badge variant={item.status === "success" ? "success" : item.status === "failed" ? "destructive" : "secondary"}>{item.status === "success" ? "成功" : item.status === "failed" ? "失败" : "等待"}</Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
+      {resultsOpen && status && visibleResults.length ? <ReloginResultsDrawer status={status} items={pagedResults} page={safeResultPage} botRiskByAccountId={botRiskByAccountId} onPageChange={setResultPage} onClose={() => setResultsOpen(false)} /> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </div>
   );
