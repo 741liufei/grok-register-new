@@ -78,6 +78,7 @@ CONFIG_PUBLIC_KEYS = (
     "register_workers",
     "user_agent",
     "cpa_auto_add",
+    "sso_detailed_risk_check",
     "cpa_token_mode",
     "cpa_auth_dir",
     "cpa_remote_url",
@@ -326,6 +327,7 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "browser_headless",
             "close_browser_on_stop",
             "cpa_auto_add",
+            "sso_detailed_risk_check",
             "grok2api_auto_import",
             "monitor_webhook_enabled",
             "outlookemail_disable_after_cpa_success",
@@ -461,6 +463,8 @@ def _serialize_record(
     else:
         item["extra"] = extra
     extra_data = item["extra"] if isinstance(item["extra"], dict) else {}
+    risk_check = extra_data.get("sso_risk_check")
+    item["sso_risk_check"] = risk_check if isinstance(risk_check, dict) else None
     item["exception_traceback"] = str(extra_data.get("exception_traceback") or "")
     item["exception_type"] = str(extra_data.get("exception_type") or "")
     item["has_exception_traceback"] = bool(item["exception_traceback"])

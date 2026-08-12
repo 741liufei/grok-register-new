@@ -17,6 +17,29 @@ export type JobStatus = {
   batch_id?: string;
 };
 
+export type SsoRiskCheck = {
+  enabled?: boolean;
+  mode?: string;
+  valid_session?: boolean;
+  email_match?: boolean | null;
+  verdict?: string;
+  found?: boolean;
+  flagged?: boolean;
+  bot_flag_source?: number | string | null;
+  bot_flag_details?: string;
+  policy?: string;
+  risk?: number | null;
+  event?: string;
+  denied?: boolean;
+  error?: string;
+  checked_at?: string;
+  response_ms?: number;
+  account?: {
+    email?: string;
+    display_name?: string;
+  };
+};
+
 export type AccountRecord = {
   id: number;
   email: string;
@@ -62,6 +85,7 @@ export type AccountRecord = {
   sso_saved: boolean;
   bot_risk?: boolean;
   bfs?: string | number | null;
+  sso_risk_check?: SsoRiskCheck | null;
   monitor_delivery?: {
     event_id: string;
     status: string;

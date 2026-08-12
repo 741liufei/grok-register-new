@@ -215,6 +215,7 @@ Windows 启动：
 | `proxy` | 注册和 OAuth 请求使用的 HTTP(S) 代理；支持 `http://host:port` 和 `http://user:password@host:port`，凭据中的特殊字符需使用 URL 百分号编码 |
 | `browser_headless` | 本机无头模式；Docker 中强制关闭 |
 | `cpa_auto_add` | 注册后生成 CPA 授权 |
+| `sso_detailed_risk_check` | 获取 SSO 后详细检查账号页；`botFlagSource=0` 正常，非 `0` 异常，缺失时自动重试 |
 | `cpa_auth_dir` | CPA JSON 保存目录 |
 | `cpa_remote_url` | CPA Management API 地址 |
 | `cpa_management_key` | CPA 管理密钥 |

@@ -471,6 +471,14 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
                   onCheckedChange={(value) => setField("cpa_auto_add", value)}
                 />
               </div>
+              <div className="sm:col-span-2">
+                <ToggleRow
+                  title="SSO 详细风控检查"
+                  description="获取并解析 SSO 后检查账号页；botFlagSource=0 正常，非 0 标记异常，缺失时自动重试"
+                  checked={!!config.sso_detailed_risk_check}
+                  onCheckedChange={(value) => setField("sso_detailed_risk_check", value)}
+                />
+              </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="cpa_token_mode">授权转换方式</Label>
                 <Select

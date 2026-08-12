@@ -28,6 +28,7 @@ from curl_cffi import requests
 from backend.integrations import auth_exchange as _s2cpa
 from backend.integrations import account_monitor as _account_monitor
 from backend.integrations import grok2api_client as _grok2api
+from backend.integrations import sso_checker as _sso_checker
 from backend.mailbox import cloudflare_worker as cloudflare_provider
 from backend.mailbox import cloud_mail as cloudmail_provider
 from backend.mailbox import duck_mail as duckmail_provider
@@ -315,6 +316,8 @@ DEFAULT_CONFIG = {
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
     # CLIProxyAPI(CPA) 直出：注册拿到 SSO 后换 token，写入 CPA / Grok2API
     "cpa_auto_add": True,
+    # 获取 SSO 后使用完整账号页解析器复查会话、邮箱与 botFlag 风控字段。
+    "sso_detailed_risk_check": False,
     # Token 换取方式：device_protocol（协议 Device Flow，默认）/ device_browser（浏览器 Device Flow）/ auth_code
     "cpa_token_mode": "device_protocol",
     # CPA 本地 auth 目录
@@ -379,17 +382,25 @@ class RegistrationRiskDenied(Exception):
 
     携带 botFlagSource：它与 access_token 里的 bfs 声明是同一个字段，
     只是一个来自注册后的账号状态页、一个来自换到的 token。所以注册风控
-    拒绝的账号要和 bfs=1 一样标记 bot_risk，前端才会显示盾牌图标。
+    拒绝的账号要和 bfs 非 0 一样标记 bot_risk，前端才会显示盾牌图标。
     """
 
-    def __init__(self, message, *, bot_risk=False, bot_flag_source=None, bot_flag_details=""):
+    def __init__(
+        self,
+        message,
+        *,
+        bot_risk=False,
+        bot_flag_source=None,
+        bot_flag_details="",
+        risk_state=None,
+    ):
         super().__init__(message)
-        # bot_risk 由抛出点显式给出，不从 bot_flag_source 反推：服务端可能
-        # policy=deny 裁决拒绝而 botFlagSource 仍解析为 0/null，那也是风控标记；
-        # 反过来"sso 为空"这类前置条件失败不是裁决，不能标。
+        # bot_risk 由抛出点显式给出；当前服务端规则仅以
+        # botFlagSource 非 0 为异常，"sso 为空"等前置失败不标记。
         self.bot_risk = bool(bot_risk)
         self.bot_flag_source = bot_flag_source
         self.bot_flag_details = str(bot_flag_details or "")
+        self.risk_state = dict(risk_state or {})
 
 
 def apply_risk_bot_flag(cpa_detail: dict, exc) -> bool:
@@ -405,6 +416,9 @@ def apply_risk_bot_flag(cpa_detail: dict, exc) -> bool:
     source = getattr(exc, "bot_flag_source", None)
     cpa_detail["bot_risk"] = True
     cpa_detail["bfs"] = "" if source is None else source
+    risk_state = getattr(exc, "risk_state", None)
+    if isinstance(risk_state, dict) and risk_state:
+        cpa_detail["sso_risk_check"] = dict(risk_state)
     return True
 
 
@@ -629,6 +643,8 @@ def persist_registration_result(
         extra_data["cpa_error"] = str(detail.get("error"))
     if detail.get("mode"):
         extra_data["cpa_mode"] = str(detail.get("mode"))
+    if isinstance(detail.get("sso_risk_check"), dict):
+        extra_data["sso_risk_check"] = dict(detail["sso_risk_check"])
     disable_detail = default_email_disable_detail(provider_name, detail)
     disable_detail.update(dict(email_disable_detail or {}))
     try:
@@ -1185,22 +1201,78 @@ def _append_sso_risk_rejected(email: str, sso: str, details: str, log_callback=N
             log_callback(f"[CPA] 保存注册风控拒绝记录失败: {exc}")
 
 
-def ensure_sso_oauth_eligible(raw_token, email="", log_callback=None) -> dict:
-    """复查新账号风控状态；无法稳定判定时不进入 OAuth。"""
-    if not config.get("cpa_auto_add", False):
-        return {}
-    if not any(
-        str(config.get(key, "") or "").strip()
-        for key in ("cpa_auth_dir", "cpa_remote_url", "grok2api_auth_dir")
-    ):
-        return {}
+def _inspect_sso_detailed_risk(sso: str, email: str, proxy: str) -> dict:
+    """使用独立 SSO Checker 返回不含凭据的详细账号与 botFlag 结果。"""
+    checker = _sso_checker.SsoChecker(
+        _sso_checker.SsoCheckConfig(
+            proxy=proxy,
+            user_agent=get_user_agent(),
+        )
+    )
+    result = checker.check(
+        _sso_checker.SsoCredential(
+            sso_token=sso,
+            expected_email=str(email or "").strip(),
+            label=str(email or "").strip(),
+        )
+    )
+    state = result.to_dict(flagged_sources=checker.config.flagged_sources)
+    bot_flag = dict(state.get("bot_flag") or {})
+    state.update(
+        {
+            "enabled": True,
+            "mode": "detailed",
+            "found": bool(bot_flag.get("found")),
+            "flagged": bool(bot_flag.get("flagged")),
+            "bot_flag_source": bot_flag.get("source"),
+            "bot_flag_details": str(bot_flag.get("details") or ""),
+            "policy": str(bot_flag.get("policy") or ""),
+            "risk": bot_flag.get("risk"),
+            "event": str(bot_flag.get("event") or ""),
+            "denied": bool(bot_flag.get("denied")),
+        }
+    )
+    return state
+
+
+def ensure_sso_oauth_eligible(
+    raw_token,
+    email="",
+    log_callback=None,
+    result_out=None,
+) -> dict:
+    """按配置复查 SSO 风控状态；详细模式同时验证会话与账号资料。"""
+    detailed = bool(config.get("sso_detailed_risk_check", False))
+    if not detailed:
+        if not config.get("cpa_auto_add", False):
+            return {}
+        if not any(
+            str(config.get(key, "") or "").strip()
+            for key in ("cpa_auth_dir", "cpa_remote_url", "grok2api_auth_dir")
+        ):
+            return {}
     sso = _normalize_sso_token(raw_token)
     if not sso:
         raise RegistrationRiskDenied("注册风控检查失败: sso 为空")
 
     def _risk_log(message):
         if log_callback:
-            log_callback(f"[CPA] {str(message).strip()}")
+            prefix = "[SSO风控]" if detailed else "[CPA]"
+            log_callback(f"{prefix} {str(message).strip()}")
+
+    def _set_risk_state(state):
+        if detailed and isinstance(result_out, dict):
+            result_out["sso_risk_check"] = dict(state or {})
+
+    def _source_status(value):
+        if value is None or value == "":
+            return "unknown"
+        if isinstance(value, bool):
+            return "flagged"
+        try:
+            return "clean" if int(value) == 0 else "flagged"
+        except (TypeError, ValueError):
+            return "unknown"
 
     retry_delays = (0, 2, 4, 8)
     proxy = _resolve_cpa_proxy()
@@ -1210,16 +1282,24 @@ def ensure_sso_oauth_eligible(raw_token, email="", log_callback=None) -> dict:
         if delay:
             _risk_log(f"风控字段尚未稳定，{delay}s 后进行第 {attempt} 次检查")
             time.sleep(delay)
-        _risk_log(f"检查新账号注册风控状态 ({attempt}/{len(retry_delays)}) ...")
-        state = _s2cpa.inspect_sso_account_state(
-            sso,
-            proxy=proxy,
-            log=_risk_log,
-        )
+        mode_label = "详细检查 SSO 会话与 botFlag" if detailed else "检查新账号注册风控状态"
+        _risk_log(f"{mode_label} ({attempt}/{len(retry_delays)}) ...")
+        if detailed:
+            state = _inspect_sso_detailed_risk(sso, email, proxy)
+        else:
+            state = _s2cpa.inspect_sso_account_state(
+                sso,
+                proxy=proxy,
+                log=_risk_log,
+            )
         last_state = state
+        _set_risk_state(state)
         source = state.get("bot_flag_source")
-        source_flagged = source not in (None, 0, "0", "")
-        if state.get("denied") or source_flagged:
+        # 服务端约定：0 为正常；null/缺失为未知；任何非零值均属于异常。
+        source_status = _source_status(source)
+        source_clean = source_status == "clean"
+        source_flagged = source_status == "flagged"
+        if source_flagged:
             details = str(
                 state.get("bot_flag_details")
                 or f"botFlagSource={source},policy=unknown,event=unknown"
@@ -1231,13 +1311,31 @@ def ensure_sso_oauth_eligible(raw_token, email="", log_callback=None) -> dict:
                 bot_risk=True,
                 bot_flag_source=source,
                 bot_flag_details=details,
+                risk_state=state,
             )
 
-        # 明确读取到非风险状态后即可继续；字段为 null 时继续短时复查，避免注册结果延迟写入。
-        if state.get("found") and (
-            source == 0
-            or str(state.get("policy") or "").lower() in {"allow", "review"}
-            or bool(state.get("bot_flag_details"))
+        # 明确读取到非风险状态后即可继续；字段为空时短时复查，避免注册结果延迟写入。
+        if detailed:
+            if (
+                state.get("valid_session")
+                and state.get("found")
+                and source_clean
+            ):
+                if state.get("email_match") is False:
+                    server_email = str((state.get("account") or {}).get("email") or "")
+                    _risk_log(
+                        "SSO 账号邮箱与本次注册邮箱不一致，继续记录检查结果: "
+                        f"expected={email or '-'} actual={server_email or '-'}"
+                    )
+                _risk_log(
+                    "详细风控检查通过: "
+                    f"botFlagSource={source!r} "
+                    f"policy={state.get('policy') or '-'} "
+                    f"risk={state.get('risk')!r}"
+                )
+                return state
+        elif state.get("found") and (
+            source in (0, "0")
         ):
             return state
 
@@ -2685,6 +2783,7 @@ def run_registration(count):
                             sso,
                             email=email,
                             log_callback=lambda m: registration_log(f"[W{wid+1}] {m}"),
+                            result_out=cpa_detail,
                         )
                         if config.get("enable_nsfw", True):
                             nsfw_ok, nsfw_msg = enable_nsfw_for_token(
@@ -3033,7 +3132,12 @@ def run_registration(count):
                 sso = wait_for_sso_cookie(
                     log_callback=registration_log, cancel_callback=controller.should_stop
                 )
-                ensure_sso_oauth_eligible(sso, email=email, log_callback=registration_log)
+                ensure_sso_oauth_eligible(
+                    sso,
+                    email=email,
+                    log_callback=registration_log,
+                    result_out=cpa_detail,
+                )
                 if config.get("enable_nsfw", True):
                     registration_log("[*] 6. 开启 NSFW")
                     nsfw_ok, nsfw_msg = enable_nsfw_for_token(

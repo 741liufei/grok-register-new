@@ -237,6 +237,16 @@ function AccountDetails({
   onRelogin: (item: AccountRecord) => void;
   reloginRunning: boolean;
 }) {
+  const riskCheck = detail.sso_risk_check;
+  const riskSource = riskCheck?.bot_flag_source;
+  const riskSourceLabel = riskSource === null || riskSource === undefined || riskSource === ""
+    ? "未知"
+    : String(riskSource);
+  const emailMatchLabel = riskCheck?.email_match === true
+    ? "一致"
+    : riskCheck?.email_match === false
+      ? "不一致"
+      : "未检查";
   const fields: Array<[string, string]> = [
     ["邮箱", detail.email],
     ["密码", showPassword ? detail.password : maskSecret(detail.password)],
@@ -301,6 +311,43 @@ function AccountDetails({
           </Badge>
         </div>
       </div>
+
+      {riskCheck ? (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <ShieldAlert className="h-4 w-4 text-sky-600" aria-hidden="true" />
+              SSO 详细风控
+            </div>
+            <Badge variant={riskCheck.flagged ? "destructive" : riskSourceLabel === "0" ? "success" : "warning"}>
+              {riskCheck.verdict || (riskCheck.flagged ? "flagged" : riskSourceLabel === "0" ? "clean" : "unknown")}
+            </Badge>
+          </div>
+          <dl className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-4">
+            {[
+              ["botFlagSource", riskSourceLabel],
+              ["Policy", riskCheck.policy || "-"],
+              ["Risk", riskCheck.risk === null || riskCheck.risk === undefined ? "-" : String(riskCheck.risk)],
+              ["Event", riskCheck.event || "-"],
+              ["会话", riskCheck.valid_session ? "有效" : "未确认"],
+              ["邮箱", emailMatchLabel],
+              ["耗时", riskCheck.response_ms === undefined ? "-" : `${riskCheck.response_ms} ms`],
+              ["检查时间", riskCheck.checked_at || "-"],
+            ].map(([label, value]) => (
+              <div key={label} className="min-w-0 bg-white px-3 py-2.5">
+                <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
+                <dd className="mt-1 break-all text-xs font-medium text-foreground">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {riskCheck.bot_flag_details || riskCheck.error ? (
+            <div className="space-y-1 border-t border-slate-200 px-3 py-2.5 text-xs leading-5">
+              {riskCheck.bot_flag_details ? <p className="break-words text-slate-700">{riskCheck.bot_flag_details}</p> : null}
+              {riskCheck.error ? <p className="break-words text-red-700">检查错误：{riskCheck.error}</p> : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {detail.screenshot_url ? (
         <div className="overflow-hidden rounded-xl border border-rose-200 bg-rose-50/50">
