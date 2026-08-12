@@ -149,6 +149,32 @@ class WebAuthJsonTests(unittest.TestCase):
             self.assertFalse(_account_has_sso({"account_file": str(invalid)}))
             self.assertFalse(_account_has_sso({"account_file": str(root / "missing.txt")}))
 
+    def test_actionable_auth_export_ids_only_include_matching_available_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            available = root / "xai-user@example.com.json"
+            available.write_text("{}", encoding="utf-8")
+            store = mock.Mock()
+            store.list_result_ids.return_value = [1, 2]
+            store.get_results_by_ids.return_value = [
+                {"id": 1, "email": "user@example.com", "cpa_auth_path": str(available)},
+                {"id": 2, "email": "missing@example.com"},
+            ]
+            gr = mock.Mock()
+            gr.config = {"cpa_auth_dir": str(root)}
+            gr.get_registration_repository.return_value = store
+            endpoint = next(
+                route.endpoint
+                for route in application.create_app().routes
+                if route.path == "/api/accounts/actionable-ids"
+            )
+
+            with mock.patch.object(application, "_gr", return_value=gr):
+                result = endpoint(action="auth_export", q="user", bot_risk="", kind="cpa")
+
+            self.assertEqual(result, {"ok": True, "ids": [1], "total": 1})
+            store.list_result_ids.assert_called_once_with(keyword="user")
+
 
 if __name__ == "__main__":
     unittest.main()

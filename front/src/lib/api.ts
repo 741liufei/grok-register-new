@@ -348,10 +348,16 @@ export const api = {
       `/api/accounts/select-ids${qs ? `?${qs}` : ""}`
     );
   },
-  actionableAccountIds: (action: "relogin" | "sso_check", q = "", botRisk = "") => {
+  actionableAccountIds: (
+    action: "relogin" | "sso_check" | "auth_export",
+    q = "",
+    botRisk = "",
+    kind?: AuthKind
+  ) => {
     const sp = new URLSearchParams({ action });
     if (q) sp.set("q", q);
     if (botRisk) sp.set("bot_risk", botRisk);
+    if (kind) sp.set("kind", kind);
     return request<{ ok: boolean; ids: number[]; total: number }>(
       `/api/accounts/actionable-ids?${sp.toString()}`
     );

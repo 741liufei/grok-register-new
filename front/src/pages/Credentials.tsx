@@ -15,6 +15,7 @@ export function CredentialsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
 
@@ -65,6 +66,19 @@ export function CredentialsPage() {
       }
       return next;
     });
+  };
+
+  const selectAllAvailable = async () => {
+    setSelectingAll(true);
+    try {
+      const result = await api.actionableAccountIds("auth_export", query.trim(), "", tab);
+      setSelected(Object.fromEntries((result.ids || []).map((id) => [id, true])));
+      notify(`已选择 ${result.total} 个可用文件`, "success");
+    } catch (error: any) {
+      notify(error.message || "选择全部文件失败", "error");
+    } finally {
+      setSelectingAll(false);
+    }
   };
 
   const batchDownload = async () => {
@@ -159,10 +173,17 @@ export function CredentialsPage() {
               <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索邮箱" className="pl-9" />
             </div>
-            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-slate-600">
-              <input type="checkbox" disabled={!selectableItems.length} checked={allVisibleSelected} onChange={(event) => toggleAllVisible(event.target.checked)} aria-label="全选本页可用授权文件" />
-              全选本页
-            </label>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+              <label className="flex min-h-10 cursor-pointer items-center gap-2">
+                <input type="checkbox" disabled={!selectableItems.length} checked={allVisibleSelected} onChange={(event) => toggleAllVisible(event.target.checked)} aria-label="全选本页可用授权文件" />
+                全选本页
+              </label>
+              <Button size="sm" variant="ghost" disabled={selectingAll || !total} onClick={() => void selectAllAvailable()}>
+                {selectingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                选择全部结果
+              </Button>
+              {selectedIds.length ? <Button size="sm" variant="ghost" onClick={() => setSelected({})}>取消</Button> : null}
+            </div>
           </div>
         </div>
 

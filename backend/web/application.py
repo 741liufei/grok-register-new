@@ -938,9 +938,36 @@ def create_app() -> FastAPI:
         action: str = Query(...),
         q: str = Query(""),
         bot_risk: str = Query(""),
+        kind: str = Query(""),
     ) -> Dict[str, Any]:
         normalized_action = str(action or "").strip().lower()
         store = _gr().get_registration_repository()
+        if normalized_action == "auth_export":
+            normalized_kind = str(kind or "").strip().lower()
+            if normalized_kind not in {"cpa", "grok2api", "sso"}:
+                raise HTTPException(status_code=400, detail="kind 必须是 cpa、grok2api 或 sso")
+            ids = store.list_result_ids(keyword=str(q or "").strip())
+            gr = _gr()
+            gr.load_config()
+            records_by_id = {
+                int(record.get("id") or 0): record
+                for record in store.get_results_by_ids(ids)
+            }
+            available: List[int] = []
+            for account_id in ids:
+                record = records_by_id.get(account_id)
+                if record is None:
+                    continue
+                try:
+                    if normalized_kind == "sso":
+                        if not _account_has_sso(record):
+                            continue
+                    else:
+                        _find_account_auth_file(record, gr.config, normalized_kind)
+                except (FileNotFoundError, OSError, TypeError, ValueError):
+                    continue
+                available.append(account_id)
+            return {"ok": True, "ids": available, "total": len(available)}
         try:
             ids = store.list_actionable_result_ids(
                 normalized_action,
