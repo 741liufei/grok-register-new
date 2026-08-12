@@ -108,7 +108,7 @@ export function SsoCheckPage() {
   const [reloginRunning, setReloginRunning] = useState(false);
   const [status, setStatus] = useState<SsoCheckStatus | null>(null);
   const [resultPage, setResultPage] = useState(1);
-  const [resultPageSize, setResultPageSize] = useState(20);
+  const [resultPageSize, setResultPageSize] = useState(5);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
   const recordedRun = useRef("");
   const preparedSelectionApplied = useRef(false);
@@ -273,7 +273,7 @@ export function SsoCheckPage() {
         {total > 0 ? <PaginationBar page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={(next) => void load(next)} onPageSizeChange={(size) => { setPageSize(size); setSelected({}); void load(1, query, size); }} /> : null}
       </Card>
 
-      {visibleResults.length ? <Card className="overflow-hidden"><div className="border-b border-slate-200 px-4 py-4 sm:px-5"><h2 className="font-semibold">本次检查结果</h2></div><SsoResultTable items={pagedResults} /><PaginationBar page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /></Card> : null}
+      {visibleResults.length ? <Card className="overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5"><div><h2 className="font-semibold">本次检查结果</h2><p className="mt-1 text-xs text-slate-500">共 {visibleResults.length} 个账号 · 第 {safeResultPage} / {Math.max(1, Math.ceil(visibleResults.length / resultPageSize))} 页</p></div><Badge variant="secondary">每页 {resultPageSize} 条</Badge></div><PaginationBar className="border-b border-t-0 bg-slate-50/60" page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} pageSizeOptions={[5, 10, 20]} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /><SsoResultTable items={pagedResults} /><PaginationBar page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} pageSizeOptions={[5, 10, 20]} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /></Card> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </div>
   );
