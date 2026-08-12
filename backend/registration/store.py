@@ -40,6 +40,9 @@ RESULT_COLUMNS = (
     "grok2api_remote_status",
     "grok2api_remote_imported_at",
     "grok2api_remote_error",
+    "sub2api_remote_status",
+    "sub2api_remote_imported_at",
+    "sub2api_remote_error",
     "email_account_id",
     "email_disable_status",
     "email_disabled_at",
@@ -114,6 +117,9 @@ class RegistrationRepository:
                     grok2api_remote_status TEXT NOT NULL DEFAULT 'not_configured',
                     grok2api_remote_imported_at TEXT NOT NULL DEFAULT '',
                     grok2api_remote_error TEXT NOT NULL DEFAULT '',
+                    sub2api_remote_status TEXT NOT NULL DEFAULT 'disabled',
+                    sub2api_remote_imported_at TEXT NOT NULL DEFAULT '',
+                    sub2api_remote_error TEXT NOT NULL DEFAULT '',
                     email_account_id TEXT NOT NULL DEFAULT '',
                     email_disable_status TEXT NOT NULL DEFAULT 'not_attempted',
                     email_disabled_at TEXT NOT NULL DEFAULT '',
@@ -181,6 +187,9 @@ class RegistrationRepository:
                 "grok2api_remote_status": "TEXT NOT NULL DEFAULT 'not_configured'",
                 "grok2api_remote_imported_at": "TEXT NOT NULL DEFAULT ''",
                 "grok2api_remote_error": "TEXT NOT NULL DEFAULT ''",
+                "sub2api_remote_status": "TEXT NOT NULL DEFAULT 'disabled'",
+                "sub2api_remote_imported_at": "TEXT NOT NULL DEFAULT ''",
+                "sub2api_remote_error": "TEXT NOT NULL DEFAULT ''",
                 "bot_risk": "INTEGER NOT NULL DEFAULT 0",
                 "bfs": "TEXT NOT NULL DEFAULT ''",
             }
@@ -283,6 +292,13 @@ class RegistrationRepository:
                 record.get("grok2api_remote_imported_at") or ""
             ),
             "grok2api_remote_error": str(record.get("grok2api_remote_error") or ""),
+            "sub2api_remote_status": str(
+                record.get("sub2api_remote_status") or "disabled"
+            ),
+            "sub2api_remote_imported_at": str(
+                record.get("sub2api_remote_imported_at") or ""
+            ),
+            "sub2api_remote_error": str(record.get("sub2api_remote_error") or ""),
             "email_account_id": str(record.get("email_account_id") or ""),
             "email_disable_status": str(
                 record.get("email_disable_status") or "not_attempted"
@@ -803,6 +819,15 @@ class RegistrationRepository:
                         "grok2api_remote_error": str(
                             detail.get("grok2api_remote_error") or ""
                         ),
+                        "sub2api_remote_status": str(
+                            detail.get("sub2api_remote_status") or "disabled"
+                        ),
+                        "sub2api_remote_imported_at": str(
+                            detail.get("sub2api_remote_imported_at") or ""
+                        ),
+                        "sub2api_remote_error": str(
+                            detail.get("sub2api_remote_error") or ""
+                        ),
                         "bot_risk": 1 if bool(detail.get("bot_risk")) else 0,
                         "bfs": (
                             ""
@@ -827,6 +852,9 @@ class RegistrationRepository:
                         "grok2api_remote_status = :grok2api_remote_status",
                         "grok2api_remote_imported_at = :grok2api_remote_imported_at",
                         "grok2api_remote_error = :grok2api_remote_error",
+                        "sub2api_remote_status = :sub2api_remote_status",
+                        "sub2api_remote_imported_at = :sub2api_remote_imported_at",
+                        "sub2api_remote_error = :sub2api_remote_error",
                         "bot_risk = :bot_risk",
                         "bfs = :bfs",
                     ]

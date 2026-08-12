@@ -62,10 +62,15 @@ const PROVIDERS = [
     description: "适合自建 cloud-mail，需要站点地址、管理员账号和域名。",
   },
 ];
-export type SettingsSection = "registration" | "cpa" | "grok2api" | "mail" | "outlook";
+// cpa / grok2api 保留类型仅为兼容；路由已重定向到 tokenauth
+export type SettingsSection = "registration" | "tokenauth" | "cpa" | "grok2api" | "mail" | "outlook";
 
 const SECTION_META: Record<SettingsSection, { title: string; description: string }> = {
   registration: { title: "注册设置", description: "注册数量、代理、浏览器语言与运行方式。" },
+  tokenauth: {
+    title: "TokenAuth",
+    description: "SSO 授权转换与下游上传目标（CPA / Grok2API / Sub2API）。",
+  },
   cpa: { title: "CPA / Auth", description: "配置 SSO 授权转换、Token 模式与 CPA 入库目标。" },
   grok2api: { title: "Grok2API", description: "维护本地授权目录、远程管理端与自动导入。" },
   mail: { title: "邮箱服务", description: "选择邮箱服务商并维护对应接口与访问凭据。" },
@@ -451,9 +456,9 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
         </Card>
         ) : null}
 
-        {section === "cpa" || section === "grok2api" ? (
+        {/* TokenAuth：授权转换 + CPA / Grok2API / Sub2API 三目标 */}
+        {section === "tokenauth" || section === "cpa" || section === "grok2api" ? (
         <div className="space-y-4">
-          {section === "cpa" ? (
           <Card>
             <CardHeader className="flex-row items-start gap-3">
               <SectionIcon><ShieldCheck className="h-5 w-5" aria-hidden="true" /></SectionIcon>
@@ -491,24 +496,26 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
               </div>
             </CardContent>
           </Card>
-          ) : null}
 
           <div className="grid gap-4">
-            {section === "cpa" ? (
             <Card>
               <CardHeader>
                 <CardTitle>CPA 目标</CardTitle>
                 <CardDescription>保存本地 CPA JSON，也可上传到远程 Management API。</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-4">
+                <ToggleRow
+                  title="上传到 CPA"
+                  description="本地目录总会写入；开关只控制是否 POST 到远程 Management API"
+                  checked={config.cpa_upload_enabled !== false}
+                  onCheckedChange={(value) => setField("cpa_upload_enabled", value)}
+                />
                 <ConfigField {...fieldState} label="本地授权目录" field="cpa_auth_dir" />
                 <ConfigField {...fieldState} label="远程 CPA 地址" field="cpa_remote_url" placeholder="http://host:8317" />
                 <ConfigField {...fieldState} label="远程管理密钥" field="cpa_management_key" type="password" />
               </CardContent>
             </Card>
-            ) : null}
 
-            {section === "grok2api" ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
@@ -575,7 +582,77 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
                 </CardContent>
               </Card>
             </div>
-            ) : null}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Sub2API 目标</CardTitle>
+                <CardDescription>
+                  注册拿到 SSO 后直传 Sub2API；服务端自行将 SSO 换成 Build OAuth token 并建号。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <ToggleRow
+                    title="上传到 Sub2API"
+                    description="开启后，每条 SSO 会调用 POST /api/v1/admin/grok/sso-to-oauth；失败不影响注册成功判定"
+                    checked={!!config.sub2api_enabled}
+                    onCheckedChange={(value) => setField("sub2api_enabled", value)}
+                  />
+                </div>
+                <ConfigField
+                  {...fieldState}
+                  label="站点根地址"
+                  field="sub2api_remote_url"
+                  placeholder="http://host:8080"
+                  helper="不要附加 /api/v1"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="Admin API Key"
+                  field="sub2api_api_key"
+                  type="password"
+                  helper="Sub2API 后台生成的 Admin API Key，以 x-api-key 头发送"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="分组 ID"
+                  field="sub2api_group_ids"
+                  placeholder="1,2"
+                  helper="分组 ID，多个用逗号分隔；留空不分组"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="代理 ID"
+                  field="sub2api_proxy_id"
+                  type="number"
+                  helper="代理 ID，0 或留空表示不使用代理"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="调度并发"
+                  field="sub2api_concurrency"
+                  type="number"
+                  helper="Sub2API 侧调度并发，默认 1"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="调度优先级"
+                  field="sub2api_priority"
+                  type="number"
+                  helper="调度优先级，默认 0"
+                />
+                <ConfigField
+                  {...fieldState}
+                  label="账号名前缀"
+                  field="sub2api_name_prefix"
+                  helper="可选，账号名前缀；留空由 Sub2API 自动命名"
+                />
+                <p className="sm:col-span-2 text-xs leading-5 text-muted-foreground">
+                  上传走 <code className="rounded bg-muted px-1 py-0.5">POST {"{url}"}/api/v1/admin/grok/sso-to-oauth</code>，
+                  Sub2API 服务端会自行将 SSO 换成 Build OAuth token 并建号。
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
         ) : null}

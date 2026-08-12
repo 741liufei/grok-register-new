@@ -28,6 +28,7 @@ from curl_cffi import requests
 from backend.integrations import auth_exchange as _s2cpa
 from backend.integrations import account_monitor as _account_monitor
 from backend.integrations import grok2api_client as _grok2api
+from backend.integrations import sub2api_client as _sub2api
 from backend.integrations import sso_checker as _sso_checker
 from backend.mailbox import cloudflare_worker as cloudflare_provider
 from backend.mailbox import cloud_mail as cloudmail_provider
@@ -332,6 +333,17 @@ DEFAULT_CONFIG = {
     "grok2api_remote_username": "",
     "grok2api_remote_password": "",
     "grok2api_auto_import": True,
+    # CPA 远程上传开关（独立于 cpa_auto_add；后者控制整个 SSO→auth 链路）
+    "cpa_upload_enabled": True,
+    # Sub2API：注册拿到 SSO 后直接上传 sso-to-oauth
+    "sub2api_enabled": False,
+    "sub2api_remote_url": "",
+    "sub2api_api_key": "",
+    "sub2api_group_ids": "",  # 逗号分隔字符串，如 "1,2"
+    "sub2api_proxy_id": 0,
+    "sub2api_concurrency": 1,
+    "sub2api_priority": 0,
+    "sub2api_name_prefix": "",
     "monitor_webhook_enabled": _environment_bool(
         "GROK_MONITOR_WEBHOOK_ENABLED", False
     ),
@@ -645,6 +657,9 @@ def persist_registration_result(
         extra_data["cpa_mode"] = str(detail.get("mode"))
     if isinstance(detail.get("sso_risk_check"), dict):
         extra_data["sso_risk_check"] = dict(detail["sso_risk_check"])
+    # Sub2API 摘要结果放入 extra，便于后续详情页展示
+    if detail.get("sub2api_remote_result") is not None:
+        extra_data["sub2api_remote_result"] = detail.get("sub2api_remote_result")
     disable_detail = default_email_disable_detail(provider_name, detail)
     disable_detail.update(dict(email_disable_detail or {}))
     try:
@@ -678,6 +693,13 @@ def persist_registration_result(
                     "grok2api_remote_imported_at", ""
                 ),
                 "grok2api_remote_error": detail.get("grok2api_remote_error", ""),
+                "sub2api_remote_status": detail.get(
+                    "sub2api_remote_status", "disabled"
+                ),
+                "sub2api_remote_imported_at": detail.get(
+                    "sub2api_remote_imported_at", ""
+                ),
+                "sub2api_remote_error": detail.get("sub2api_remote_error", ""),
                 "email_account_id": disable_detail.get("account_id", ""),
                 "email_disable_status": disable_detail.get("status", "not_attempted"),
                 "email_disabled_at": disable_detail.get("disabled_at", ""),
@@ -1361,6 +1383,17 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
             result.update(values)
 
     cpa_enabled = bool(config.get("cpa_auto_add", False))
+    # CPA 远程上传独立开关，默认开启以保持旧行为
+    cpa_upload_enabled = bool(config.get("cpa_upload_enabled", True))
+    # Sub2API：默认关闭，需显式开启；失败不拉低注册成功判定
+    sub2api_enabled = bool(config.get("sub2api_enabled", False))
+    sub2api_configured = _sub2api.Sub2APIClient.is_configured(config)
+    if not sub2api_enabled:
+        sub2api_status = "disabled"
+    elif sub2api_configured:
+        sub2api_status = "ready"
+    else:
+        sub2api_status = "not_configured"
     _set_result(
         enabled=cpa_enabled,
         status="not_attempted" if cpa_enabled else "disabled",
@@ -1375,6 +1408,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
         grok2api_remote_status="not_configured",
         grok2api_remote_imported_at="",
         grok2api_remote_error="",
+        sub2api_remote_status=sub2api_status,
+        sub2api_remote_imported_at="",
+        sub2api_remote_error="",
+        sub2api_remote_result=None,
         bot_risk=False,
         bfs="",
         error="",
@@ -1507,7 +1544,7 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
             except Exception as local_exc:
                 _cpa_log(f"CPA 本地写入失败: {local_exc}")
                 auth_errors.append(f"CPA 本地失败: {local_exc}")
-        if remote_url:
+        if remote_url and cpa_upload_enabled:
             try:
                 # CPA 管理端通常是本机或内网服务，远程上传固定直连；
                 # config.proxy 只用于 xAI/Grok 的 SSO→token/Auth 链路。
@@ -1530,6 +1567,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                 _cpa_log(f"CPA 远程上传失败: {remote_exc}")
                 auth_errors.append(f"CPA 远程失败: {remote_exc}")
                 _set_result(cpa_remote_status="failed", cpa_remote_error=str(remote_exc))
+        elif remote_url and not cpa_upload_enabled:
+            # 配了远程地址但关闭上传开关：仅本地保存
+            _cpa_log("已配置 CPA 远程地址，但上传开关关闭，仅保存本地")
+            _set_result(cpa_remote_status="disabled")
         if g2a_dir:
             try:
                 gpaths = _s2cpa.write_grok2api_auth_bundle(
@@ -1603,6 +1644,75 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
             except Exception as g2a_exc:
                 _cpa_log(f"Grok2API 写入失败: {g2a_exc}")
                 auth_errors.append(f"Grok2API 失败: {g2a_exc}")
+
+        # Sub2API 分支：与 CPA/Grok2API 并列，独立 try/except，不参与 wrote_ok
+        # 服务端自行 SSO→OAuth，这里只传原始 SSO 字符串
+        if sub2api_enabled and sub2api_configured:
+            try:
+                name_prefix = str(config.get("sub2api_name_prefix", "") or "").strip()
+                group_ids = _sub2api.Sub2APIClient.parse_group_ids(
+                    config.get("sub2api_group_ids", "")
+                )
+                _cpa_log(
+                    "[Sub2API] 远程上传网络: 直连 -> "
+                    f"{str(config.get('sub2api_remote_url') or '').rstrip('/')}"
+                )
+                with _sub2api.Sub2APIClient.from_config(config) as sub2_client:
+                    remote_result = sub2_client.sso_to_oauth(
+                        [sso],
+                        name=name_prefix,
+                        proxy_id=config.get("sub2api_proxy_id", 0),
+                        group_ids=group_ids,
+                        concurrency=config.get("sub2api_concurrency", 1),
+                        priority=config.get("sub2api_priority", 0),
+                    )
+                created = remote_result.get("created") or []
+                failed = remote_result.get("failed") or []
+                created_n = len(created) if isinstance(created, list) else int(bool(created))
+                failed_n = len(failed) if isinstance(failed, list) else int(bool(failed))
+                if failed_n and created_n:
+                    remote_status = "partial"
+                elif failed_n and not created_n:
+                    remote_status = "failed"
+                else:
+                    remote_status = "success"
+                error_text = ""
+                if failed_n:
+                    error_text = f"failed={failed_n}"
+                    if isinstance(failed, list) and failed:
+                        error_text = f"{error_text}: {failed[:3]}"
+                _set_result(
+                    sub2api_remote_status=remote_status,
+                    sub2api_remote_imported_at=RegistrationRepository.now_text(),
+                    sub2api_remote_error=error_text,
+                    sub2api_remote_result={
+                        "created_count": created_n,
+                        "failed_count": failed_n,
+                        "created": created if isinstance(created, list) else created,
+                        "failed": failed if isinstance(failed, list) else failed,
+                    },
+                )
+                if remote_status == "success":
+                    _cpa_log(f"[Sub2API] 已上传 (created={created_n})")
+                else:
+                    _cpa_log(
+                        f"[Sub2API] 上传结果 {remote_status} "
+                        f"(created={created_n}, failed={failed_n})"
+                    )
+            except Exception as sub2_exc:
+                # 不写入 auth_errors，避免影响 CPA 成功判定
+                _cpa_log(f"[Sub2API] 上传失败: {sub2_exc}")
+                _set_result(
+                    sub2api_remote_status="failed",
+                    sub2api_remote_error=str(sub2_exc),
+                    sub2api_remote_result=None,
+                )
+        elif sub2api_enabled and not sub2api_configured:
+            _cpa_log("[Sub2API] 已开启但未配齐 remote_url / api_key，跳过上传")
+            _set_result(sub2api_remote_status="not_configured")
+        else:
+            _set_result(sub2api_remote_status="disabled")
+
         if not wrote_ok:
             error_text = "; ".join(auth_errors) or "CPA/Grok2API 均未写入成功"
             _set_result(
@@ -2643,6 +2753,11 @@ def run_registration(count):
     _token_mode_map = {"device_protocol": "协议 Device Flow", "device_browser": "浏览器 Device Flow", "auth_code": "Authorization Code"}
     _token_mode_label = _token_mode_map.get(str(config.get("cpa_token_mode", "device_protocol")), "协议 Device Flow")
     registration_log(f"[*] SSO→auth: {'开' if config.get('cpa_auto_add') else '关（账号将不计成功）'}" + (f"（{_token_mode_label}）" if config.get('cpa_auto_add') else ""))
+    # TokenAuth 各下游上传开关摘要，便于开跑时一眼确认
+    _cpa_up = "开" if config.get("cpa_upload_enabled", True) else "关"
+    _g2a_up = "开" if config.get("grok2api_auto_import", False) else "关"
+    _s2a_up = "开" if config.get("sub2api_enabled", False) else "关"
+    registration_log(f"[*] [TokenAuth] CPA上传={_cpa_up} Grok2API导入={_g2a_up} Sub2API={_s2a_up}")
     traceback_log_lock = threading.Lock()
     logged_traceback_signatures = set()
     # 启动前清理上次崩溃 / 强杀残留的临时 profile 目录
