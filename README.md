@@ -332,6 +332,8 @@ compose.monitor.yaml    Grok Account Monitor 联动编排
   <img alt="Grok Register Stars 趋势" src="docs/images/stars-trend-light.svg">
 </picture>
 
+> 图表由 GitHub Actions 每 6 小时读取最新 Stars 总数并自动更新，浅色与深色主题会随 GitHub 页面设置切换。
+
 ## 友情链接
 
 - [Linux.do 社区](https://linux.do)
