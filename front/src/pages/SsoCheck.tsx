@@ -107,6 +107,8 @@ export function SsoCheckPage() {
   const [starting, setStarting] = useState(false);
   const [reloginRunning, setReloginRunning] = useState(false);
   const [status, setStatus] = useState<SsoCheckStatus | null>(null);
+  const [resultPage, setResultPage] = useState(1);
+  const [resultPageSize, setResultPageSize] = useState(20);
   const [toast, setToast] = useState<{ message: string; tone?: "default" | "success" | "error" }>({ message: "" });
   const recordedRun = useRef("");
   const preparedSelectionApplied = useRef(false);
@@ -200,11 +202,17 @@ export function SsoCheckPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setResultPage(1);
+  }, [status?.run_id]);
+
   const eligible = accounts.filter((item) => item.sso_available);
   const selectedIds = Object.entries(selected).filter(([, checked]) => checked).map(([id]) => Number(id));
   const allSelected = eligible.length > 0 && eligible.every((item) => selected[item.id]);
   const progress = status?.total_count ? Math.round(status.completed_count / status.total_count * 100) : 0;
   const visibleResults = status?.items || [];
+  const safeResultPage = Math.min(resultPage, Math.max(1, Math.ceil(visibleResults.length / resultPageSize)));
+  const pagedResults = visibleResults.slice((safeResultPage - 1) * resultPageSize, safeResultPage * resultPageSize);
 
   const start = async () => {
     if (!selectedIds.length || status?.running) return;
@@ -265,7 +273,7 @@ export function SsoCheckPage() {
         {total > 0 ? <PaginationBar page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={(next) => void load(next)} onPageSizeChange={(size) => { setPageSize(size); setSelected({}); void load(1, query, size); }} /> : null}
       </Card>
 
-      {visibleResults.length ? <Card className="overflow-hidden"><div className="border-b border-slate-200 px-4 py-4 sm:px-5"><h2 className="font-semibold">本次检查结果</h2></div><SsoResultTable items={visibleResults} /></Card> : null}
+      {visibleResults.length ? <Card className="overflow-hidden"><div className="border-b border-slate-200 px-4 py-4 sm:px-5"><h2 className="font-semibold">本次检查结果</h2></div><SsoResultTable items={pagedResults} /><PaginationBar page={safeResultPage} pageSize={resultPageSize} total={visibleResults.length} onPageChange={setResultPage} onPageSizeChange={(size) => { setResultPageSize(size); setResultPage(1); }} /></Card> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </div>
   );
