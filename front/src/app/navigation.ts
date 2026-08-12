@@ -1,10 +1,9 @@
 import {
   Archive,
-  Cable,
   FileJson2,
   History,
+  KeyRound,
   LayoutDashboard,
-  ListChecks,
   Mail,
   MonitorDot,
   PlaySquare,
@@ -39,8 +38,8 @@ export const navigationGroups = [
     label: "系统配置",
     items: [
       { to: "/settings/registration", label: "注册设置", shortLabel: "设置", icon: SlidersHorizontal },
-      { to: "/settings/cpa", label: "CPA / Auth", shortLabel: "CPA", icon: ListChecks },
-      { to: "/settings/grok2api", label: "Grok2API", shortLabel: "Grok2API", icon: Cable },
+      // TokenAuth：合并 CPA / Grok2API / Sub2API 上传目标
+      { to: "/settings/tokenauth", label: "TokenAuth", shortLabel: "TokenAuth", icon: KeyRound },
       { to: "/settings/mail", label: "邮箱服务", shortLabel: "邮箱", icon: Mail },
       { to: "/settings/outlook", label: "Outlook 邮箱池", shortLabel: "Outlook", icon: Settings2 },
       { to: "/settings/config", label: "配置文件", shortLabel: "配置", icon: FileJson2 },

@@ -88,6 +88,15 @@ CONFIG_PUBLIC_KEYS = (
     "grok2api_remote_username",
     "grok2api_remote_password",
     "grok2api_auto_import",
+    "cpa_upload_enabled",
+    "sub2api_enabled",
+    "sub2api_remote_url",
+    "sub2api_api_key",
+    "sub2api_group_ids",
+    "sub2api_proxy_id",
+    "sub2api_concurrency",
+    "sub2api_priority",
+    "sub2api_name_prefix",
     "monitor_webhook_enabled",
     "monitor_webhook_url",
     "monitor_webhook_token",
@@ -110,6 +119,7 @@ SENSITIVE_HINT_KEYS = {
     "outlookemail_session_cookie",
     "cpa_management_key",
     "grok2api_remote_password",
+    "sub2api_api_key",
     "monitor_webhook_token",
     "mailnest_api_key",
     "yyds_api_key",
@@ -329,6 +339,8 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "cpa_auto_add",
             "sso_detailed_risk_check",
             "grok2api_auto_import",
+            "cpa_upload_enabled",
+            "sub2api_enabled",
             "monitor_webhook_enabled",
             "outlookemail_disable_after_cpa_success",
         ):
@@ -338,6 +350,9 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "register_workers",
             "outlookemail_top",
             "monitor_webhook_timeout_seconds",
+            "sub2api_proxy_id",
+            "sub2api_concurrency",
+            "sub2api_priority",
         ):
             try:
                 value = int(value)
@@ -351,6 +366,12 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
                 value = max(1, min(value, 50))
             elif key == "monitor_webhook_timeout_seconds":
                 value = max(1, min(value, 60))
+            elif key == "sub2api_proxy_id":
+                value = max(0, value)
+            elif key == "sub2api_concurrency":
+                value = max(1, min(value, 32))
+            elif key == "sub2api_priority":
+                value = max(-100, min(value, 100))
         elif key == "log_level":
             value = str(value or "info").strip().lower() or "info"
         elif key == "browser_locale":
@@ -382,12 +403,20 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             "proxy",
             "cpa_remote_url",
             "grok2api_remote_url",
+            "sub2api_remote_url",
             "monitor_webhook_url",
             "outlookemail_api_base",
             "duckmail_api_base",
             "cloudflare_api_base",
         ):
             value = proxy_update if key == "proxy" else str(value or "").strip()
+            if key in ("sub2api_remote_url",):
+                value = value.rstrip("/")
+                if value and not value.startswith(("http://", "https://")):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Sub2API 站点地址必须以 http:// 或 https:// 开头",
+                    )
             if key == "monitor_webhook_url" and value:
                 try:
                     account_monitor.validate_monitor_config(
@@ -399,6 +428,16 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
                     )
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
+        elif key == "sub2api_group_ids":
+            # 按逗号拆分后只保留纯数字项，防止脏数据进入请求体
+            raw = str(value or "").strip()
+            cleaned: List[str] = []
+            if raw:
+                for part in raw.split(","):
+                    item = part.strip()
+                    if item.isdigit():
+                        cleaned.append(item)
+            value = ",".join(cleaned)
         else:
             if isinstance(value, (dict, list)):
                 continue
